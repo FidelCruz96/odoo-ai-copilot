@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="rule_ai_chat_own" model="ir.rule">
+        <field name="name">AI Chat: User</field>
+        <field name="model_id" ref="odoo_ai_assistant.model_ai_chat"/>
+        <field name="domain_force">['|', ('user_id', '=', user.id), ('user_id', '=', False)]</field>
+        <field name="groups" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+
+    <record id="rule_ai_chat_admin_all" model="ir.rule">
+        <field name="name">AI Chat: Admin</field>
+        <field name="model_id" ref="odoo_ai_assistant.model_ai_chat"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_system'))]"/>
+    </record>
+</odoo>

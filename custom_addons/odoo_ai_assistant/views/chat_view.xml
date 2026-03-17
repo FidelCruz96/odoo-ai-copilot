@@ -1,0 +1,74 @@
+<odoo>
+
+    <record id="view_ai_chat_ui" model="ir.ui.view">
+        <field name="name">chatbot UI</field>
+        <field name="model">ai.chat.ui</field>
+        <field name="arch" type="xml">
+
+            <form string="AI Assistant" create="0" edit="0">
+                <sheet>
+                    <div class="o_ai_chat_window">
+                        <div class="o_ai_chat_header">
+                            <span>Asistente IA</span>
+                            <span class="o_ai_chat_status" id="ai_chat_status"></span>
+                        </div>
+                        <div class="o_ai_chat_messages" id="ai_chat_messages"></div>
+                        <div class="o_ai_chat_input">
+                            <textarea id="ai_chat_message" class="o_input" rows="2" placeholder="Escribe tu mensaje... (Enter para enviar, Ctrl+Enter para salto)"></textarea>
+                            <div class="o_ai_chat_actions">
+                                <a class="btn btn-secondary" role="button" href="#" id="ai_chat_clear_btn">Limpiar</a>
+                                <a class="btn btn-primary" role="button" href="#" id="ai_chat_send_btn">Enviar</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <group invisible="1">
+                        <field name="name"/>
+                    </group>
+                </sheet>
+            </form>
+
+        </field>
+    </record>
+
+    <record id="ai_chat_ui_singleton" model="ai.chat.ui">
+        <field name="name">AI Chat UI</field>
+    </record>
+
+    <record id="action_ai_chat_form" model="ir.actions.act_window">
+        <field name="name">AI Assistant</field>
+        <field name="res_model">ai.chat.ui</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_ai_chat_ui"/>
+        <field name="res_id" ref="ai_chat_ui_singleton"/>
+        <field name="target">current</field>
+        <field name="context">{'create': False, 'edit': False}</field>
+    </record>
+
+    <record id="view_ai_chat_list" model="ir.ui.view">
+        <field name="name">chatbot Prototipo list</field>
+        <field name="model">ai.chat</field>
+        <field name="arch" type="xml">
+            <list string="AI Chats">
+                <field name="user_id"/>
+                <field name="question"/>
+                <field name="answer"/>
+                <field name="create_date"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="action_ai_chat_list" model="ir.actions.act_window">
+        <field name="name">AI Chats</field>
+        <field name="res_model">ai.chat</field>
+        <field name="view_mode">list</field>
+        <field name="view_id" ref="view_ai_chat_list"/>
+        <field name="target">current</field>
+        <field name="context">{'create': False}</field>
+    </record>
+
+    <menuitem id="menu_ai_root" name="AI Assistant" sequence="10"/>
+    <menuitem id="menu_ai_chat" name="Chat" parent="menu_ai_root" action="action_ai_chat_form" sequence="10"/>
+    <menuitem id="menu_ai_chat_history" name="Chat History" parent="menu_ai_root" action="action_ai_chat_list" sequence="20"/>
+
+</odoo>

@@ -1,0 +1,70 @@
+services:
+  db:
+    container_name: ${PG_CONTAINER_NAME}
+    image: postgres:${PG_VERSION}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "${PG_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - odoo_ai_net
+
+  web:
+    container_name: ${ODOO_CONTAINER_NAME}
+    image: dockerodoo:${ODOO_VERSION}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${ODOO_PORT}:8069"
+      - "${DEBUGPY_PORT}:8880"
+    volumes:
+      - ./config:/etc/odoo
+      - ${ODOO_SERVER}:/var/lib/odoo/odoo
+      - ${ODOO_DATA}:/var/lib/odoo/odoo/data
+      - ${CUSTOM_ADDONS}:/var/lib/odoo/custom_addons
+      - ${ENTERPRISE_ADDONS}:/var/lib/odoo/enterprise
+    networks:
+      - odoo_ai_net
+
+  ai_service:
+    container_name: ai_service
+    build:
+      context: ./odoo_ai_service
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ODOO_BASE_URL: ${ODOO_BASE_URL}
+      ODOO_URL: ${ODOO_URL}
+      ODOO_DB: ${ODOO_DB}
+      ODOO_USERNAME: ${ODOO_USERNAME}
+      ODOO_PASSWORD: ${ODOO_PASSWORD}
+      AI_PROVIDER: ${AI_PROVIDER}
+      AI_MODEL: ${AI_MODEL}
+      LOG_LEVEL: ${LOG_LEVEL}
+    networks:
+      - odoo_ai_net
+
+networks:
+  odoo_ai_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
