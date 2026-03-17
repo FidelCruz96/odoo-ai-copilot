@@ -253,3 +253,5 @@ Mejoras futuras:
 
 ## License
 Licensed under the Apache License 2.0. See `LICENSE`.
+# odoo-ai-copilot
+AI assistant connected to Odoo ERP using external tools and service orchestration
