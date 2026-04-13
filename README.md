@@ -1,257 +1,606 @@
 # Odoo AI Copilot
 
-## Introducción
+Asistente conversacional híbrido para Odoo que permite consultar datos reales del ERP usando lenguaje natural.
 
-AI Copilot que permite consultar datos del ERP Odoo usando lenguaje natural.
+En lugar de depender completamente de un LLM, el sistema combina rutas determinísticas, memoria contextual por sesión, validaciones semánticas y tools seguras de solo lectura. Cuando una consulta no puede resolverse por reglas, el agente recurre a un LLM con tool calling controlado.
 
-En lugar de navegar múltiples menús o reportes, los usuarios pueden simplemente preguntar:
+El objetivo es simple: convertir preguntas de negocio en consultas confiables sobre el ERP, reduciendo tiempo de búsqueda, costo en tokens y errores de interpretación.
 
-"Top clientes por facturación"
+---
 
-"Ventas del último mes"
+## Qué hace hoy
 
-"Facturas pendientes"
+- Consulta **ventas, facturas y compras** usando lenguaje natural.
+- Resuelve **conteos, listados, rankings y agregaciones**.
+- Maneja **follow-ups contextuales** como:
+  - `esa venta`
+  - `muéstrame sus productos`
+  - `¿tiene factura?`
+- Pide **aclaraciones** cuando una pregunta es ambigua:
+  - `ventas vs facturas`
+  - `total vs detalle`
+  - `mayor venta individual vs total acumulado`
+- Usa **tools controladas** para consultar Odoo sin acceso directo a la base de datos.
+- Prioriza **rutas determinísticas** para mejorar latencia, costo y consistencia.
 
-El sistema interpreta la pregunta, consulta el ERP usando herramientas controladas y devuelve una respuesta basada en los datos reales del sistema.
+---
 
 ## Demo
-**Ejemplo de consulta:**
 
-*Usuario pregunta:*
-> Encuentra clientes con más facturación
+### Ejemplo 1: aclaración + resolución determinística
 
-**Respuesta del asistente::**
-1. JOSEPH CAMPOS ABOGADOS S.A.C – 2809  
-2. CENTRO EDUCATIVO PARTICULAR SAN AGUSTIN – 1664  
-3. COLEGIO MARKHAM – 1500
+**Usuario**
+> facturas pendientes este mes
 
-El asistente obtiene los datos directamente del ERP usando el ORM de Odoo.
+**Asistente**
+> ¿Quieres solo el total o quieres ver el detalle?
+
+**Usuario**
+> detalle
+
+**Resultado**
+> listado determinístico de facturas pendientes del período, consultado directamente desde Odoo.
+
+### Ejemplo 2: consulta analítica
+
+**Usuario**
+> Top clientes por facturación
+
+**Asistente**
+> 1. Cliente A – 2809  
+> 2. Cliente B – 1664  
+> 3. Cliente C – 1500
+
+### Ejemplo 3: follow-up contextual
+
+**Usuario**
+> dime la mayor venta del último mes
+
+**Asistente**
+> ¿Te refieres a la orden de venta individual más alta o al total vendido del período?
+
+**Usuario**
+> la venta individual
+
+**Asistente**
+> resuelve la orden y la guarda como entidad principal de sesión
+
+**Usuario**
+> ¿qué productos se vendieron?
+
+**Asistente**
+> consulta directamente las líneas relacionadas sin volver a pedir contexto
+
+---
 
 ## Problema
 
-Los sistemas ERP como Odoo contienen grandes volúmenes de datos, pero obtener información suele requerir:
+Los ERP como Odoo concentran grandes volúmenes de información, pero obtener respuestas útiles suele requerir:
 
 - navegar múltiples menús
-
 - aplicar filtros manuales
+- conocer el modelo exacto y sus relaciones
+- construir reportes específicos
 
-- generar reportes específicos
+Para usuarios de negocio, eso vuelve lenta la obtención de información operativa.  
+Y para un enfoque 100% LLM, aparecen otros problemas:
 
-Para muchos usuarios de negocio, acceder a insights rápidos puede ser difícil o lento.
+- mayor costo
+- más latencia
+- más riesgo semántico
+- respuestas menos consistentes
+
+---
 
 ## Solución
 
-Odoo AI Copilot permite consultar el ERP mediante lenguaje natural.
+Odoo AI Copilot traduce preguntas de negocio a consultas estructuradas sobre el ERP.
 
-El sistema utiliza un agente basado en LLM que:
+La solución usa un **agente híbrido** que sigue este orden:
 
-- interpreta la intención del usuario
+1. resuelve aclaraciones pendientes
+2. intenta follow-ups por memoria de sesión
+3. intenta rutas determinísticas mediante intents y planner
+4. si no alcanza, usa LLM con tools controladas
 
-- selecciona la herramienta adecuada
+Esto permite reducir la dependencia del modelo y mantener mayor control sobre:
 
-- consulta el ERP mediante el ORM
+- qué modelo consultar
+- qué operación ejecutar
+- qué filtros aplicar
+- cómo presentar la respuesta
 
-- devuelve una respuesta clara basada en los datos
+El sistema opera en **modo solo lectura**, con acceso únicamente a operaciones controladas vía ORM de Odoo.
 
-El agente no tiene acceso directo a la base de datos, sino que opera mediante herramientas controladas.
+---
+
+## Resultados y mejoras del diseño
+
+La evolución del agente se centró en pasar de un enfoque más dependiente del LLM a uno más controlado y eficiente.
+
+### Mejoras incorporadas
+
+- Separación entre intents de **conteo** y **listado**
+- Aclaraciones explícitas para preguntas ambiguas
+- Introducción de **semantic frame** antes del planner
+- Memoria estructurada con **entidad primaria** y **secundaria**
+- Render determinístico para listados y rankings críticos
+- Métricas de calidad para detectar errores de fidelidad o consistencia
+
+### Beneficios observados
+
+- Menor uso de tokens en consultas cubiertas por rutas determinísticas
+- Menor latencia en conteos, listados simples y agregaciones conocidas
+- Menor riesgo de mezclar conceptos como:
+  - ventas vs facturas
+  - total vs detalle
+  - entidad principal vs línea relacionada
+- Mayor trazabilidad en el comportamiento del agente
+
+---
 
 ## Arquitectura
+
+### Diagrama de arquitectura
+
+```mermaid
+flowchart TD
+    U[Usuario en Odoo UI] --> C[Odoo Module: odoo_ai_assistant]
+    C -->|POST /ask| S[AI Service FastAPI: odoo_ai_service]
+    S --> A[Agente híbrido]
+    A --> D[Ruta determinística]
+    A --> L[LLM + Tool Calling]
+    D --> T[Tools seguras]
+    L --> T
+    T --> O[Odoo Controller interno: /ai/get_data y /ai/schema]
+    O --> ORM[Odoo ORM]
+    ORM --> O
+    O --> T
+    T --> A
+    A --> S
+    S --> C
+    C --> U
 ```
-Usuario
-   ↓
-Odoo Controller
-   ↓
-AI Service (FastAPI)
-   ↓
-LLM Agent
-   ↓
-Tools
-   ↓
-Odoo ORM
-```
 
-**Arquitectura desacoplada:**
+### Flujo lógico
 
-- Odoo maneja la interfaz del usuario
+1. El usuario consulta desde el módulo `odoo_ai_assistant` en Odoo.
+2. Odoo envía la petición al `odoo_ai_service`.
+3. El agente intenta resolver la consulta por aclaración, memoria y rutas determinísticas.
+4. Si no es suficiente, usa LLM con tool calling controlado.
+5. Las tools consultan Odoo mediante `/ai/get_data` y `/ai/schema`.
+6. El resultado vuelve al usuario y se actualiza la memoria de sesión.
 
-- FastAPI gestiona la lógica del agente
+### Decisiones de diseño
 
-- El LLM decide qué herramientas utilizar
+#### Agente híbrido
 
-- Las tools ejecutan consultas seguras al ERP
+No todas las preguntas necesitan un LLM.  
+El sistema intenta primero rutas determinísticas para mejorar:
+
+- velocidad
+- costo
+- consistencia
+- control semántico
+
+#### Solo lectura
+
+Se priorizó seguridad y confianza operativa antes que acciones transaccionales.  
+El agente no crea ni modifica registros.
+
+#### Tools controladas
+
+El LLM no ejecuta código arbitrario ni consulta directamente la base de datos.  
+Solo puede usar herramientas explícitas y validadas.
+
+#### Memoria estructurada
+
+La sesión mantiene una memoria mínima para follow-ups, separando:
+
+- `primary_entity`: entidad principal de negocio
+- `secondary_entity`: entidad contextual secundaria
+
+Esto reduce errores cuando el usuario hace referencias como:
+
+- `esa venta`
+- `esa factura`
+- `sus productos`
+
+#### Semantic frame
+
+Antes del planner, la consulta se normaliza en una estructura semántica con:
+
+- acción
+- modelo
+- filtros
+- rango temporal
+- agregación
+- ordenamiento
+
+Esto mejora la estabilidad de los intents y evita depender del texto libre.
+
+#### Render determinístico
+
+Las respuestas críticas, como listados y rankings, no se dejan a narración libre del LLM.  
+Se renderizan de forma determinística para preservar orden, métricas y fidelidad.
+
+---
 
 ## Tecnologías
 
-**Backend:**
+### Backend
 
 - Python
 - FastAPI
 - Docker
 - PostgreSQL
 
-**ERP:**
+### ERP
 
-- Odoo V18
+- Odoo 18
 
-**AI:**
+### IA
 
 - OpenAI API
 - GPT-4o mini
 
+---
+
 ## Diseño del agente
 
-El agente interactúa con el ERP mediante herramientas especializadas.
+El agente interactúa con Odoo mediante herramientas especializadas.
 
-### Tools disponibles:
+### Capacidades actuales
 
-### `query_odoo_search`
+- Memoria estructurada por sesión con entidad primaria/secundaria
+- Follow-ups directos y relacionales
+- Aclaraciones para consultas ambiguas
+- Semantic frame previo al planner
+- Render determinístico en casos críticos
+- Validación semántica y de schema antes de consultar
+- Métricas de calidad por respuesta
+
+### Tools disponibles
+
+#### `query_odoo_search`
+
 Busca registros y devuelve IDs.
 
+#### `query_odoo_read`
 
-### `query_odoo_read`
 Lee campos específicos de registros.
 
+#### `query_odoo_group`
 
-### `query_odoo_group`
 Realiza agregaciones usando `read_group`.
 
-Esto permite que el LLM consulte el ERP sin ejecutar código arbitrario ni acceder directamente a la base de datos.
+#### `query_odoo_count`
+
+Cuenta registros usando `search_count`.
+
+#### `get_schema`
+
+Obtiene schema resumido por modelo para validar campos antes de consultar.
+
+---
+
+## Memoria y follow-ups
+
+El sistema mantiene una memoria mínima por sesión para conservar contexto útil entre turnos.
+
+### Ejemplo
+
+1. Usuario: `dime la mayor venta del último mes`
+2. Agente: `¿Te refieres a la orden de venta individual más alta o al total vendido del período?`
+3. Usuario: `la venta individual`
+4. Agente: guarda la orden como entidad principal
+5. Usuario: `¿qué productos se vendieron?`
+6. Agente: consulta directamente las líneas relacionadas
+
+### Estructura usada actualmente
+
+- `primary_entity`: entidad principal de negocio
+- `secondary_entity`: entidad secundaria contextual
+- `entity follow-up`: relectura de la entidad actual
+- `related follow-up`: consulta de modelos relacionados
+- `pending clarification`: aclaración pendiente entre turnos
+
+---
+
+## Aclaraciones
+
+Cuando la consulta es ambigua, el agente pide precisión antes de consultar.
+
+### Casos típicos
+
+- `mayor venta`
+- `mayor compra`
+- `ventas pendientes`
+- `facturas pendientes este mes`
+
+### Ejemplos de aclaración
+
+- ¿Te refieres a pedidos de venta o a facturas emitidas?
+- ¿Quieres solo el total o quieres ver el detalle?
+- ¿Te refieres al registro individual más alto o al acumulado del período?
+
+Esto evita errores semánticos frecuentes y mejora la consistencia del flujo.
+
+---
 
 ## Seguridad
 
-El sistema implementa varias restricciones:
+El sistema aplica varias restricciones para reducir riesgo operativo:
 
-- Acceso limitado a operaciones de lectura
-- Uso obligatorio de herramientas controladas
-- El LLM no recibe credenciales del ERP
-- No existe acceso directo a la base de datos
-- Las llamadas al LLM se realizan desde el AI Service, nunca desde el navegador.
-- Se recomienda rotación de API keys y uso de secretos en el entorno de despliegue.
+- acceso limitado a operaciones de lectura
+- uso obligatorio de tools controladas
+- sin acceso directo a base de datos
+- el LLM no recibe credenciales del ERP
+- las llamadas al modelo se hacen desde el AI Service, nunca desde el navegador
 
-Las operaciones permitidas son:
-- search
-- read
-- read_group
+### Operaciones permitidas
 
-Esto reduce riesgos de seguridad en el uso de IA dentro de sistemas empresariales.
+- `search`
+- `search_count`
+- `read`
+- `read_group`
 
-## Performance
+### Recomendaciones de despliegue
 
-Optimización implementada:
+- usar secretos en variables de entorno
+- rotar API keys
+- limitar permisos por modelo según el caso de uso
+- revisar record rules y accesos del usuario en Odoo
 
-- Separación de tools para reducir ambigüedad
-- Uso de `read_group` para agregaciones
-- Reducción de datasets enviados al LLM
-
-Resultados:
-
-| Versión | Tokens promedio |
-|-------|-------|
-| Inicial | ~5000 |
-| Optimizada | ~831 |
-
-Reducción aproximada: **83%**
+---
 
 ## Instalación
-1. Configura las variables de entorno (ver sección abajo).
+
+1. Configura las variables de entorno.
 2. Levanta los servicios:
-   ```bash
-   docker compose up -d --build
-   ```
+
+```bash
+docker compose up -d --build
+```
+
 3. En Odoo:
-   - Actualiza la lista de Apps.
-   - Instala el módulo **AI Assistant** (`odoo_ai_assistant`) en la base deseada.
+- actualiza la lista de Apps
+- instala el módulo AI Assistant (`odoo_ai_assistant`)
+
+### Rebuild de desarrollo
+
+Si solo cambias código del servicio de IA:
+
+```bash
+docker compose up -d --build ai_service
+```
+
+Si cambias modelos o campos del módulo Odoo, además de rebuild/restart debes actualizar el módulo `odoo_ai_assistant`.
+
+---
 
 ## Configuración
-El proyecto se apoya en `.env` (en la raíz) y en `config/odoo.conf`.
 
-### Variables de entorno principales
-Configura al menos estas variables en `.env`:
-- `OPENAI_API_KEY` (obligatorio)
-- `ODOO_BASE_URL` (ej. `http://web:8069`)
-- `ODOO_DB` (ej. `communitas`)
+El proyecto usa `.env` en la raíz y `config/odoo.conf`.
 
-Variables comunes ya usadas por `docker-compose.yaml`:
-- `ODOO_VERSION`, `ODOO_PORT`, `ODOO_CONTAINER_NAME`
-- `PG_VERSION`, `PG_PORT`, `PG_CONTAINER_NAME`, `PG_USER`, `PG_PASSWORD`
-- `ODOO_SERVER`, `ODOO_DATA`, `CUSTOM_ADDONS`, `ENTERPRISE_ADDONS`
+### Variables mínimas
 
-Puedes ajustar límites de tokens y logging con estas variables:
-- `LLM_MODEL` (default: `gpt-4o-mini`)
-- `LLM_MAX_INPUT_TOKENS` (default: `80000`)
-- `LLM_MAX_COMPLETION_TOKENS` (default: `512`)
-- `LLM_MAX_MESSAGE_CHARS` (default: `24000`)
-- `LLM_MAX_TOOL_CHARS` (default: `12000`)
-- `LLM_TOKEN_CHAR_RATIO` (default: `4.0`)
-- `LLM_LOG_TOKEN_USAGE` (default: `true`)
+- `OPENAI_API_KEY`
+- `ODOO_BASE_URL`
+- `ODOO_DB`
+
+### Variables comunes
+
+- `ODOO_VERSION`
+- `ODOO_PORT`
+- `ODOO_CONTAINER_NAME`
+- `PG_VERSION`
+- `PG_PORT`
+- `PG_CONTAINER_NAME`
+- `PG_USER`
+- `PG_PASSWORD`
+- `ODOO_SERVER`
+- `ODOO_DATA`
+- `CUSTOM_ADDONS`
+- `ENTERPRISE_ADDONS`
+
+### Variables de control del LLM
+
+- `LLM_MODEL`
+- `LLM_MAX_INPUT_TOKENS`
+- `LLM_MAX_COMPLETION_TOKENS`
+- `LLM_MAX_MESSAGE_CHARS`
+- `LLM_MAX_TOOL_CHARS`
+- `LLM_TOKEN_CHAR_RATIO`
+- `LLM_LOG_TOKEN_USAGE`
+
+---
 
 ## Guía rápida de uso
-1. Abre Odoo en tu navegador (puerto definido por `ODOO_PORT`).
-2. Entra al menú del módulo **AI Assistant**.
+
+1. Abre Odoo en tu navegador.
+2. Entra al módulo AI Assistant.
 3. Escribe una consulta, por ejemplo:
-   - “Lista los clientes”
-   - “Top clientes por facturación”
-   - “Ventas del último mes”
-4. El asistente devolverá el resultado usando datos del ERP.
+- Lista los clientes
+- Top clientes por facturación
+- Ventas del último mes
+- Facturas pendientes
+4. El asistente responderá usando datos reales del ERP.
 
-## Cómo funciona
-1. El usuario hace una pregunta en Odoo.
-2. El controller de Odoo envía la pregunta al **AI Service**.
-3. El LLM decide si necesita datos y llama una herramienta.
-4. La herramienta consulta Odoo vía `/ai/get_data`.
-5. El LLM genera la respuesta final con los datos obtenidos.
+---
 
+## Métricas de calidad
+
+Además de latencia, tokens y tool calls, el agente registra señales de calidad como:
+
+- `entity_consistent`
+- `ranking_preserved`
+- `response_faithful`
+
+Estas señales ayudan a evaluar si la respuesta respetó:
+
+- la entidad correcta
+- el orden de un ranking
+- la fidelidad respecto a los datos consultados
+
+---
 
 ## Limitaciones
-- Solo lectura (no crea ni modifica registros).
-- Requiere que el módulo `odoo_ai_assistant` esté instalado.
-- Campos incorrectos generan errores (“Invalid field”).
-- Consultas temporales dependen de campos correctos (`date_order`, `invoice_date`).
+
+- Solo lectura
+- Requiere el módulo `odoo_ai_assistant`
+- No todas las consultas ambiguas tienen todavía una intención determinística dedicada
+- Algunas relaciones dependen del modelado particular del cliente en Odoo
+- La memoria actual maneja entidad primaria/secundaria, no un grafo completo de múltiples entidades simultáneas
+- Consultas temporales dependen del uso correcto de campos como `date_order` o `invoice_date`
+
+### Trade-offs
+
+- Se priorizó seguridad y control antes que escritura sobre el ERP
+- Se favorecen respuestas determinísticas en casos críticos, aunque eso reduce flexibilidad en algunos escenarios
+- Algunas consultas complejas aún pueden requerir LLM cuando no existe intent dedicado
+- La precisión final depende tanto del diseño del agente como de la calidad del modelo de datos en Odoo
+
+---
 
 ## Estructura del proyecto
-```
+
+```text
 .
 ├── addons/
-│   └── custom_addons/odoo_ai_assistant/
+│   ├── custom_addons/
+│   │   └── odoo_ai_assistant/
+│   │       ├── __manifest__.py
+│   │       ├── controllers/
+│   │       │   └── chat_controller.py
+│   │       ├── models/
+│   │       │   ├── chat_ui.py
+│   │       │   ├── model.py
+│   │       │   ├── schema_cache.py
+│   │       │   ├── session_memory.py
+│   │       │   └── settings.py
+│   │       ├── security/
+│   │       │   ├── ai_chat_rules.xml
+│   │       │   └── ir.model.access.csv
+│   │       ├── static/src/
+│   │       │   ├── css/chat.css
+│   │       │   └── js/chat.js
+│   │       └── views/
+│   │           ├── chat_context_buttons.xml
+│   │           ├── chat_view.xml
+│   │           └── settings_view.xml
+│   └── ... (otros addons de negocio)
 ├── odoo_ai_service/
-│   ├── agents/
+│   ├── AGENT_STATE.md
+│   ├── main.py
 │   ├── llm/
+│   │   └── llm_client.py
+│   ├── schemas/
+│   │   └── chat_schema.py
 │   ├── tools/
-│   └── main.py
+│   │   ├── odoo_get_tool.py
+│   │   └── tool_definitions.py
+│   ├── agents/
+│   │   ├── assistant_agent.py
+│   │   └── agent/
+│   │       ├── assistant_agent.py
+│   │       ├── clarification_resolver.py
+│   │       ├── memory_store.py
+│   │       ├── reference_resolver.py
+│   │       ├── execution/
+│   │       │   ├── result_compressor.py
+│   │       │   ├── session_state.py
+│   │       │   └── tool_executor.py
+│   │       ├── intents/
+│   │       │   ├── defaults.py
+│   │       │   ├── intent_catalog.py
+│   │       │   ├── intent_matcher.py
+│   │       │   ├── planner.py
+│   │       │   └── semantic_frame.py
+│   │       ├── metrics/
+│   │       │   └── telemetry.py
+│   │       ├── validators/
+│   │       │   ├── domain_validator.py
+│   │       │   ├── schema_validator.py
+│   │       │   └── semantic_validator.py
+│   │       └── prompts/
+│   ├── tests/
+│   │   ├── test_clarification_resolver.py
+│   │   ├── test_deterministic_render.py
+│   │   ├── test_memory_store.py
+│   │   ├── test_metrics.py
+│   │   ├── test_reference_resolver.py
+│   │   └── test_semantic_frame.py
+│   ├── parse_metrics.py
+│   ├── Dockerfile
+│   └── requirements.txt
 ├── config/
 ├── data/
 ├── db/
 └── docker-compose.yaml
 ```
 
+---
+
 ## Troubleshooting
-- **404 en `/ai/get_data`**  
-  Verifica que el módulo `odoo_ai_assistant` esté instalado y reinicia Odoo.
 
-- **Error de “Invalid field”**  
-  El campo no existe en ese modelo. Ajusta el dominio o usa el campo correcto (ej. `date_order` en `sale.order`).
+### 404 en `/ai/get_data`
 
-- **Permisos insuficientes**  
-  Asegura que el usuario tenga acceso al modelo y que el controller use `sudo()` cuando corresponda.
+Verifica que el módulo `odoo_ai_assistant` esté instalado y reinicia Odoo.
 
-- **Base de datos incorrecta**  
-  Verifica `ODOO_DB` en `.env` y que la BD exista en PostgreSQL.
+### Invalid field
 
-- **Rate limit (429)**  
-  Reduce tokens de entrada (`LLM_MAX_INPUT_TOKENS`), limita resultados o usa agregaciones.
+Ajusta el dominio o usa el campo correcto del modelo.
 
-- **El LLM no usa la tool correcta**  
-  Revisa el prompt del agente y agrega ejemplos específicos para esa consulta.
+### Permisos insuficientes
 
+Revisa accesos del usuario y uso de `sudo()` cuando corresponda.
+
+### Base de datos incorrecta
+
+Verifica `ODOO_DB` y la existencia real de la BD.
+
+### Rate limit (429)
+
+Reduce tokens de entrada, limita resultados o favorece agregaciones.
+
+### La tool elegida no es la correcta
+
+Revisa intents, planner y ejemplos del agente.
+
+### La aclaración se repite
+
+Verifica persistencia correcta de memoria de sesión.
+
+### El follow-up no usa memoria
+
+Verifica `chat_session_key` y reenvío de memoria entre requests.
+
+### No encuentra productos o facturas relacionadas
+
+Revisa si las relaciones asumidas por el agente coinciden con el modelo real del cliente.
+
+### Timeout entre Odoo y AI Service
+
+Aumenta timeout HTTP o reduce complejidad de la consulta.
+
+### En rankings usa `*_count` en lugar de la métrica esperada
+
+Revisa que `fields`, `orderby` y render estén alineados con la métrica real.
+
+---
 
 ## Roadmap
-Mejoras futuras:
-- Schema discovery de modelos Odoo
-- Soporte para consultas temporales
+
+- Más intenciones determinísticas para consultas ambiguas
+- Más resolutores relacionales basados en memoria
+- Mejor render de negocio para estados, montos y fechas
+- Métricas más finas de fidelidad y consistencia
 - Caching de resultados
 - Integración MCP (Model Context Protocol)
 
+---
+
 ## License
+
 Licensed under the Apache License 2.0. See `LICENSE`.
-# odoo-ai-copilot
-AI assistant connected to Odoo ERP using external tools and service orchestration
