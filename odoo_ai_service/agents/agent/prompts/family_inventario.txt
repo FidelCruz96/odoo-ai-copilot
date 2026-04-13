@@ -1,0 +1,4 @@
+Familia de intención: inventario
+
+Reglas semánticas:
+- "stock" o "existencias" se refiere a cantidades disponibles.

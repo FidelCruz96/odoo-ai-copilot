@@ -4,8 +4,40 @@ import { FormController } from "@web/views/form/form_controller"
 import { onMounted } from "@odoo/owl"
 import { patch } from "@web/core/utils/patch"
 
-const STORAGE_KEY = "odoo_ai_chat_history"
+const STORAGE_KEY_PREFIX = "odoo_ai_chat_history"
+const SESSION_KEY_STORAGE = "odoo_ai_chat_session_key"
 let aiChatContext = {}
+
+function generateSessionKey() {
+    return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getSessionKey() {
+    try {
+        let sessionKey = localStorage.getItem(SESSION_KEY_STORAGE)
+        if (!sessionKey) {
+            sessionKey = generateSessionKey()
+            localStorage.setItem(SESSION_KEY_STORAGE, sessionKey)
+        }
+        return sessionKey
+    } catch (err) {
+        return "chat_fallback_session"
+    }
+}
+
+function resetSessionKey() {
+    const sessionKey = generateSessionKey()
+    try {
+        localStorage.setItem(SESSION_KEY_STORAGE, sessionKey)
+    } catch (err) {
+        // ignore storage errors
+    }
+    return sessionKey
+}
+
+function getHistoryStorageKey() {
+    return `${STORAGE_KEY_PREFIX}:${getSessionKey()}`
+}
 
 function nowTime() {
     const d = new Date()
@@ -14,7 +46,7 @@ function nowTime() {
 
 function loadHistory() {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY)
+        const raw = localStorage.getItem(getHistoryStorageKey())
         return raw ? JSON.parse(raw) : []
     } catch (err) {
         return []
@@ -37,10 +69,79 @@ function getShortHistory(limit = 8) {
 
 function saveHistory(history) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(history))
+        localStorage.setItem(getHistoryStorageKey(), JSON.stringify(history))
     } catch (err) {
         // ignore storage errors
     }
+}
+
+function escapeHtml(text) {
+    return String(text || "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;")
+}
+
+function formatInlineMarkdown(text) {
+    return text
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/\*(.+?)\*/g, "<em>$1</em>")
+}
+
+function renderMessageHtml(text) {
+    const normalized = escapeHtml(text).replace(/\r\n/g, "\n").trim()
+    if (!normalized) {
+        return ""
+    }
+
+    const lines = normalized.split("\n")
+    const html = []
+    let listType = null
+
+    const closeList = () => {
+        if (listType) {
+            html.push(`</${listType}>`)
+            listType = null
+        }
+    }
+
+    for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line) {
+            closeList()
+            continue
+        }
+
+        const orderedMatch = line.match(/^(\d+)\.\s+(.+)$/)
+        if (orderedMatch) {
+            if (listType !== "ol") {
+                closeList()
+                html.push(`<ol start="${orderedMatch[1]}">`)
+                listType = "ol"
+            }
+            html.push(`<li>${formatInlineMarkdown(orderedMatch[2])}</li>`)
+            continue
+        }
+
+        const unorderedMatch = line.match(/^[-*]\s+(.+)$/)
+        if (unorderedMatch) {
+            if (listType !== "ul") {
+                closeList()
+                html.push("<ul>")
+                listType = "ul"
+            }
+            html.push(`<li>${formatInlineMarkdown(unorderedMatch[1])}</li>`)
+            continue
+        }
+
+        closeList()
+        html.push(`<p>${formatInlineMarkdown(line)}</p>`)
+    }
+
+    closeList()
+    return html.join("")
 }
 
 function appendMessage(role, text, time, persist = true) {
@@ -52,7 +153,8 @@ function appendMessage(role, text, time, persist = true) {
     const bubble = document.createElement("div")
     bubble.className = `o_ai_msg o_ai_msg_${role}`
     const content = document.createElement("div")
-    content.innerText = text
+    content.className = "o_ai_msg_content"
+    content.innerHTML = renderMessageHtml(text)
     bubble.appendChild(content)
 
     const meta = document.createElement("div")
@@ -155,7 +257,10 @@ async function sendMessage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 question: message,
-                context: aiChatContext || {},
+                context: {
+                    ...(aiChatContext || {}),
+                    chat_session_key: getSessionKey(),
+                },
                 history: getShortHistory(8),
             })
         })
@@ -206,6 +311,7 @@ function initChatUI() {
             if (container) {
                 container.innerHTML = ""
             }
+            resetSessionKey()
             saveHistory([])
             ensureGreeting()
         })

@@ -1,0 +1,7 @@
+Familia de intención: compras
+
+Reglas semánticas:
+- "compras" de la empresa normalmente significa órdenes de compra (`purchase.order`), no ventas (`sale.order`).
+- "proveedor" corresponde a `partner_id` en compras.
+- "últimas compras" prioriza orden temporal descendente.
+- "compras realizadas" implica estados confirmados (`purchase`, `done`) cuando aplique.

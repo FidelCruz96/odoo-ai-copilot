@@ -1,0 +1,7 @@
+Familia de intención: clientes
+
+Reglas semánticas:
+- "cliente" debe evitar contactos secundarios sin valor comercial.
+- Prioriza commercial_partner_id o clientes empresa cuando aplique.
+- "más compras" puede referirse a monto o cantidad según contexto.
+- Si la pregunta dice "top clientes" sin aclarar, prioriza monto total salvo evidencia contraria.

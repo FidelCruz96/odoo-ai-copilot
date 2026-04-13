@@ -28,4 +28,19 @@
             </xpath>
         </field>
     </record>
+
+    <record id="view_sale_order_form_ai_chat" model="ir.ui.view">
+        <field name="name">sale.order.form.ai.chat</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <button name="%(action_ai_chat_form)d"
+                        type="action"
+                        class="btn btn-secondary"
+                        string="Chat IA"
+                        context="{'active_model': 'sale.order', 'active_id': id, 'active_ids': [id]}"/>
+            </xpath>
+        </field>
+    </record>
 </odoo>

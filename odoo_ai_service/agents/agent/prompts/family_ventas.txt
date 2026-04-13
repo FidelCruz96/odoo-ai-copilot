@@ -1,0 +1,8 @@
+Familia de intención: ventas
+
+Reglas semánticas:
+- "ventas" normalmente significa monto vendido.
+- "pedidos" significa cantidad de órdenes, no suma de monto.
+- "vendedor" corresponde a user_id en ventas.
+- "cliente" corresponde a partner_id o commercial_partner_id según aplique.
+- "producto más vendido" requiere líneas de venta, no sale.order.

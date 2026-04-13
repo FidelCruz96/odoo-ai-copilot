@@ -11,7 +11,7 @@ app = FastAPI()
 @app.post("/ask")
 def ask(q: Question):
     logger.info("ask question=%s", q.question)
-    answer = ask_agent(q.question, context=q.context, history=q.history)
-    logger.info("ask answer=%s", answer)
+    result = ask_agent(q.question, context=q.context, history=q.history)
+    logger.info("ask answer=%s", result.get("answer"))
 
-    return {"answer": answer}
+    return result

@@ -1,0 +1,8 @@
+Familia de intención: facturacion
+
+Reglas semánticas:
+- "facturas" usa account.move.
+- "facturas vencidas" requiere fecha de vencimiento menor a hoy.
+- "pagadas" no es igual a "publicadas".
+- "pendientes" suele implicar not_paid o partial.
+- No mezclar pedidos de venta con facturas.

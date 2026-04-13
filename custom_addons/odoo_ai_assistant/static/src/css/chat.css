@@ -36,6 +36,35 @@
     white-space: pre-wrap;
 }
 
+.o_ai_msg_content p {
+    margin: 0;
+}
+
+.o_ai_msg_content p + p {
+    margin-top: 8px;
+}
+
+.o_ai_msg_content ul,
+.o_ai_msg_content ol {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.o_ai_msg_content p + ul,
+.o_ai_msg_content p + ol,
+.o_ai_msg_content ul + p,
+.o_ai_msg_content ol + p,
+.o_ai_msg_content ul + ul,
+.o_ai_msg_content ol + ol,
+.o_ai_msg_content ul + ol,
+.o_ai_msg_content ol + ul {
+    margin-top: 8px;
+}
+
+.o_ai_msg_content li + li {
+    margin-top: 4px;
+}
+
 .o_ai_msg_user {
     align-self: flex-end;
     background: #e2f0ff;

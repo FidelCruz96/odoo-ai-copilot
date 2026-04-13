@@ -1,6 +1,7 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_ai_chat_user,ai.chat.user,odoo_ai_assistant.model_ai_chat,,1,1,1,0
 access_ai_chat_admin,ai.chat.admin,odoo_ai_assistant.model_ai_chat,base.group_system,1,1,1,1
+access_ai_chat_session_memory_admin,ai.chat.session.memory.admin,odoo_ai_assistant.model_ai_chat_session_memory,base.group_system,1,1,1,1
 access_ai_chat_ui_user,ai.chat.ui.user,odoo_ai_assistant.model_ai_chat_ui,,1,1,1,0
 access_ai_chat_ui_admin,ai.chat.ui.admin,odoo_ai_assistant.model_ai_chat_ui,base.group_system,1,1,1,1
 access_ai_schema_cache_admin,ai.schema.cache.admin,odoo_ai_assistant.model_ai_schema_cache,base.group_system,1,1,1,1

@@ -81,21 +81,47 @@ def _require_service_token():
     return None
 
 
+def _get_session_key(client_context):
+    if not isinstance(client_context, dict):
+        return None
+    session_key = client_context.get("chat_session_key")
+    if not session_key:
+        return None
+    return str(session_key).strip() or None
+
+
+def _get_memory_store():
+    return request.env["ai.chat.session.memory"].sudo()
+
+
+def _get_session_memory(user_id, session_key):
+    if not session_key:
+        return {}
+    return _get_memory_store().get_memory_for_user_session(user_id, session_key)
+
+
+def _save_session_memory(user_id, session_key, memory):
+    if not session_key or not isinstance(memory, dict):
+        return
+    _get_memory_store().save_memory_for_user_session(user_id, session_key, memory)
+
+
 class AIChatController(http.Controller):
 
     @http.route("/ai_assistant/ask", type="json", auth="user")
     def ask(self, question, context=None):
-
         ai_url = AI_SERVICE_URL
         _logger.info("AI ask (json) question=%s", question)
         user = request.env.user
         company = request.env.company
         ctx = request.context or {}
+        session_key = _get_session_key(context or {})
+        memory = _get_session_memory(user.id, session_key)
         history = []
         history_limit, use_server_history = _get_history_settings()
         if use_server_history and history_limit > 0:
             history = request.env["ai.chat"].sudo().search(
-                [("user_id", "=", user.id)],
+                [("user_id", "=", user.id), ("session_key", "=", session_key)] if session_key else [("user_id", "=", user.id)],
                 order="create_date desc",
                 limit=history_limit,
             )
@@ -114,6 +140,7 @@ class AIChatController(http.Controller):
                 "lang": ctx.get("lang"),
                 "tz": ctx.get("tz"),
                 "client": context or {},
+                "memory": memory,
                 "history_limit": history_limit,
                 "use_server_history": use_server_history,
                 "history_server": history_payload,
@@ -127,14 +154,20 @@ class AIChatController(http.Controller):
         _logger.info("AI ask (json) status=%s body=%s", response.status_code, response.text)
 
         answer = ""
+        memory_response = None
         try:
-            answer = response.json().get("answer", "")
+            result = response.json()
+            answer = result.get("answer", "")
+            memory_response = result.get("memory")
         except Exception:
             _logger.exception("AI ask (json) response is not JSON")
             answer = "Ocurrió un error al procesar la respuesta del servicio de IA."
 
+        _save_session_memory(user.id, session_key, memory_response)
+
         request.env["ai.chat"].sudo().create({
             "user_id": request.env.user.id,
+            "session_key": session_key,
             "question": question,
             "answer": answer
         })
@@ -154,11 +187,13 @@ class AIChatController(http.Controller):
         user = request.env.user
         company = request.env.company
         ctx = request.context or {}
+        session_key = _get_session_key(client_context)
+        memory = _get_session_memory(user.id, session_key)
         history = []
         history_limit, use_server_history = _get_history_settings()
         if use_server_history and history_limit > 0:
             history = request.env["ai.chat"].sudo().search(
-                [("user_id", "=", user.id)],
+                [("user_id", "=", user.id), ("session_key", "=", session_key)] if session_key else [("user_id", "=", user.id)],
                 order="create_date desc",
                 limit=history_limit,
             )
@@ -176,27 +211,34 @@ class AIChatController(http.Controller):
                 "lang": ctx.get("lang"),
                 "tz": ctx.get("tz"),
                 "client": client_context,
+                "memory": memory,
                 "history_limit": history_limit,
                 "use_server_history": use_server_history,
                 "history_server": history_payload,
             },
         }
         try:
-            response = requests.post(ai_url, json=payload, timeout=20)
+            response = requests.post(ai_url, json=payload, timeout=60)
         except RequestException:
             _logger.exception("AI ask_http request failed")
             return request.make_json_response({"answer": "No pude conectar con el servicio de IA. Intenta nuevamente."})
         _logger.info("AI ask_http status=%s body=%s", response.status_code, response.text)
 
         answer = ""
+        memory_response = None
         try:
-            answer = response.json().get("answer", "")
+            result = response.json()
+            answer = result.get("answer", "")
+            memory_response = result.get("memory")
         except Exception:
             _logger.exception("AI ask_http response is not JSON")
             answer = "Ocurrió un error al procesar la respuesta del servicio de IA."
 
+        _save_session_memory(user.id, session_key, memory_response)
+
         request.env["ai.chat"].sudo().create({
             "user_id": request.env.user.id,
+            "session_key": session_key,
             "question": question,
             "answer": answer
         })
@@ -231,6 +273,8 @@ class AIController(http.Controller):
                 result = Model.search_read(domain, fields, limit=limit)
             elif operation == "search":
                 result = Model.search(domain, limit=limit).ids
+            elif operation == "search_count":
+                result = Model.search_count(domain)
             elif operation == "read":
                 result = Model.browse(ids).read(fields)
             elif operation == "read_group":

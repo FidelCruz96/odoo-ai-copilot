@@ -1,0 +1,5 @@
+Familia de intención: productos
+
+Reglas semánticas:
+- "producto más vendido" requiere sale.order.line.
+- "producto más comprado" requiere purchase.order.line.
