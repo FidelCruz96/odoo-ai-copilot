@@ -149,6 +149,103 @@ class TestDeterministicRender(unittest.TestCase):
         self.assertIn("2. PROD B | cantidad: 20000.0", answer)
         self.assertNotIn("product_id_count", answer)
 
+    def test_clientes_facturas_vencidas_ranking_render(self):
+        plan = {
+            "tool": "query_odoo_group",
+            "arguments": {
+                "model": "account.move",
+                "domain": [
+                    ["move_type", "=", "out_invoice"],
+                    ["state", "=", "posted"],
+                    ["payment_state", "in", ["not_paid", "partial"]],
+                    ["invoice_date_due", "<", "2026-04-16"],
+                ],
+                "fields": ["partner_id", "amount_residual:sum"],
+                "groupby": ["partner_id"],
+                "orderby": "__count desc",
+                "limit": 5,
+            },
+        }
+
+        tool_rows = [
+            {"partner_id": [10, "CLIENTE A"], "partner_id_count": 6, "amount_residual": 1200.0},
+            {"partner_id": [11, "CLIENTE B"], "partner_id_count": 4, "amount_residual": 600.0},
+        ]
+
+        with patch.object(agent, "execute_tool", return_value=tool_rows):
+            answer, _memory = agent._execute_deterministic_plan(
+                "clientes_facturas_vencidas_ranking",
+                plan,
+                "que clientes tienen mas facturas vencidas",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Clientes con más facturas vencidas:", answer)
+        self.assertIn("1. CLIENTE A | facturas vencidas: 6 | saldo pendiente: 1200.0", answer)
+        self.assertIn("2. CLIENTE B | facturas vencidas: 4 | saldo pendiente: 600.0", answer)
+
+    def test_resumen_operativo_hoy_deterministic(self):
+        plan = {
+            "tool": "summary_operativo_hoy",
+            "arguments": {
+                "today": "2026-04-16",
+                "today_start": "2026-04-16 00:00:00",
+                "tomorrow_start": "2026-04-17 00:00:00",
+            },
+        }
+
+        with patch.object(agent, "execute_tool", side_effect=[3, 12, 4, 7]):
+            answer, _memory = agent._execute_deterministic_plan(
+                "resumen_operativo_hoy",
+                plan,
+                "dame un resumen operativo de hoy",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Resumen operativo de hoy (2026-04-16):", answer)
+        self.assertIn("Ventas confirmadas hoy: 3", answer)
+        self.assertIn("Facturas pendientes de cobro: 12", answer)
+        self.assertIn("Órdenes de compra por recibir: 4", answer)
+        self.assertIn("Pickings pendientes de validar: 7", answer)
+
+    def test_count_pickings_por_estado_deterministic(self):
+        plan = {
+            "tool": "summary_pickings_por_estado",
+            "arguments": {},
+        }
+
+        with patch.object(agent, "execute_tool", side_effect=[2, 5, 140]):
+            answer, _memory = agent._execute_deterministic_plan(
+                "count_pickings_por_estado",
+                plan,
+                "cuantos pickings estan en espera disponible y hecho",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Conteo de pickings por estado:", answer)
+        self.assertIn("En espera: 2", answer)
+        self.assertIn("Disponible: 5", answer)
+        self.assertIn("Hecho: 140", answer)
+
+    def test_purchase_read_render_uses_proveedor_label(self):
+        rows = [
+            {
+                "id": 10,
+                "name": "PO-10",
+                "partner_id": [3, "Proveedor A"],
+                "date_order": "2026-04-16 10:00:00",
+                "amount_total": 500.0,
+                "state": "purchase",
+            }
+        ]
+
+        answer = agent._format_deterministic_read_answer("ordenes_compra_pendientes_recepcion", "purchase.order", rows)
+        self.assertIn("Órdenes de compra encontradas:", answer)
+        self.assertIn("Proveedor: Proveedor A", answer)
+
 
 if __name__ == "__main__":
     unittest.main()

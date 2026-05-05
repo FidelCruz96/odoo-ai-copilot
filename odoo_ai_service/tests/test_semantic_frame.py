@@ -69,6 +69,36 @@ class TestSemanticFrame(unittest.TestCase):
         self.assertIn(["invoice_date", ">=", "2026-04-01"], domain)
         self.assertIn(["invoice_date", "<=", "2026-04-30"], domain)
 
+    def test_apply_frame_purchase_respects_date_approve_and_uses_semiclosed_range(self):
+        plan = {
+            "tool": "query_odoo_group",
+            "arguments": {
+                "model": "purchase.order",
+                "domain": [
+                    ["date_approve", ">=", "2026-04-01"],
+                    ["date_approve", "<=", "2026-04-30"],
+                    ["state", "in", ["purchase", "done"]],
+                ],
+                "fields": ["partner_id", "amount_total:sum"],
+                "groupby": ["partner_id"],
+                "orderby": "amount_total desc",
+            },
+        }
+        frame = {
+            "model": "purchase.order",
+            "action": "aggregate",
+            "filters": {},
+            "time_range": {"from": "2026-04-01", "to": "2026-04-30"},
+            "ordering": None,
+            "limit": 10,
+        }
+
+        adjusted = apply_frame_to_plan(plan, frame)
+        domain = adjusted.get("arguments", {}).get("domain", [])
+        self.assertIn(["date_approve", ">=", "2026-04-01 00:00:00"], domain)
+        self.assertIn(["date_approve", "<", "2026-05-01 00:00:00"], domain)
+        self.assertNotIn(["date_order", ">=", "2026-04-01"], domain)
+
 
 if __name__ == "__main__":
     unittest.main()

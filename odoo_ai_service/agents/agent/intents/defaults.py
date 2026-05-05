@@ -4,6 +4,8 @@ from datetime import date, timedelta
 import re
 import unicodedata
 
+from ..agent_rules import get_guardrail_terms
+
 
 def _normalize_text(text: str) -> str:
     text = (text or "").lower().strip()
@@ -75,13 +77,16 @@ def _contains_any(text: str, keywords: list[str]) -> bool:
 
 def _infer_model_from_question(question: str):
     q = _normalize_text(question)
+    guardrail_terms = get_guardrail_terms()
 
-    compras_keywords = ["compra", "compras", "proveedor", "proveedores", "orden de compra", "ordenes de compra"]
-    facturas_keywords = ["factura", "facturas", "boleta", "boletas", "nota de credito", "notas de credito"]
-    ventas_keywords = ["venta", "ventas", "pedido", "pedidos", "vendedor", "cotizacion", "cotizaciones"]
+    compras_keywords = guardrail_terms.get("purchase_terms", [])
+    facturas_keywords = guardrail_terms.get("invoice_terms", []) + ["boleta", "boletas", "nota de credito", "notas de credito"]
+    ventas_keywords = guardrail_terms.get("sales_terms", []) + ["vendedor", "cotizacion", "cotizaciones"]
 
     if _contains_any(q, facturas_keywords):
         return "account.move"
+    if _contains_any(q, ["picking", "pickings", "recepcion", "recepción", "albaran", "albarán"]):
+        return "stock.picking"
     if _contains_any(q, compras_keywords):
         return "purchase.order"
     if _contains_any(q, ventas_keywords):
@@ -96,6 +101,8 @@ def _date_field_for_model(model: str):
         return "date_order"
     if model == "account.move":
         return "invoice_date"
+    if model == "stock.picking":
+        return "scheduled_date"
     return None
 
 
@@ -115,6 +122,23 @@ def _has_domain_clause(domain, field_name: str) -> bool:
         if isinstance(clause, (list, tuple)) and len(clause) == 3 and clause[0] == field_name:
             return True
     return False
+
+
+def _has_date_range_for_field(domain, field_name: str) -> bool:
+    for clause in domain or []:
+        if isinstance(clause, (list, tuple)) and len(clause) == 3:
+            field, op, _ = clause
+            if field == field_name and op in {">", ">=", "<", "<=", "="}:
+                return True
+    return False
+
+
+def _date_range_clauses(field_name: str, start: date, end: date):
+    datetime_fields = {"date_order", "scheduled_date", "date", "date_done", "create_date", "write_date"}
+    if field_name in datetime_fields:
+        end_next = end + timedelta(days=1)
+        return [[field_name, ">=", f"{start} 00:00:00"], [field_name, "<", f"{end_next} 00:00:00"]]
+    return [[field_name, ">=", str(start)], [field_name, "<=", str(end)]]
 
 
 def detect_period_range(question: str):
@@ -194,18 +218,24 @@ def apply_intent_defaults(intent: str, arguments: dict, question: str) -> dict:
         return arguments
 
     domain = list(arguments.get("domain") or [])
+    model = arguments.get("model")
 
     if intent in ("top_vendedor_por_monto", "top_vendedor_por_pedidos"):
         domain = append_domain(domain, [["user_id", "!=", False]])
 
-    if intent in ("top_cliente_por_monto", "ultimos_clientes_creados"):
+    if intent == "ultimos_clientes_creados":
         domain = append_domain(domain, partner_hygiene_domain())
         domain = append_domain(domain, [["customer_rank", ">", 0]])
 
     if intent == "top_cliente_por_monto":
         domain = append_domain(domain, [["partner_id", "!=", False]])
-        domain = append_domain(domain, [["partner_id.parent_id", "=", False]])
-        domain = append_domain(domain, [["partner_id.active", "=", True]])
+        if model == "sale.order":
+            domain = append_domain(domain, [["partner_id.customer_rank", ">", 0]])
+            domain = append_domain(domain, [["partner_id.parent_id", "=", False]])
+            domain = append_domain(domain, [["partner_id.active", "=", True]])
+        else:
+            domain = append_domain(domain, partner_hygiene_domain())
+            domain = append_domain(domain, [["customer_rank", ">", 0]])
 
     if intent == "ventas_total_periodo":
         has_date = any(
@@ -233,15 +263,24 @@ def apply_query_guardrails(tool_name: str, arguments: dict, question: str) -> di
     q = _normalize_text(question)
     model = payload.get("model")
     domain = list(payload.get("domain") or [])
+    guardrail_terms = get_guardrail_terms()
+
+    sales_terms = guardrail_terms.get("sales_terms", [])
+    purchase_terms = guardrail_terms.get("purchase_terms", [])
+    invoice_terms = guardrail_terms.get("invoice_terms", [])
+    pending_terms = guardrail_terms.get("pending_terms", [])
+    orders_with_invoice_terms = guardrail_terms.get("orders_with_invoice_terms", [])
 
     inferred_model = _infer_model_from_question(question)
     if inferred_model and (not model or model in ("sale.order", "purchase.order", "account.move")):
         model = inferred_model
         payload["model"] = inferred_model
 
-    has_sales_terms = _contains_any(q, ["venta", "ventas", "pedido", "pedidos", "orden de venta", "ordenes de venta"])
-    has_invoice_terms = _contains_any(q, ["factura", "facturas", "comprobante", "comprobantes", "emitida", "emitidas"])
-    has_pending_terms = _contains_any(q, ["pendiente", "pendientes"])
+    has_sales_terms = _contains_any(q, sales_terms)
+    has_purchase_terms = _contains_any(q, purchase_terms)
+    has_invoice_terms = _contains_any(q, invoice_terms)
+    has_pending_terms = _contains_any(q, pending_terms)
+    has_orders_with_invoice_terms = _contains_any(q, orders_with_invoice_terms)
 
     # Regla de negocio: "ventas pendientes" no debe derivar a account.move
     # salvo que el usuario hable explícitamente de facturas.
@@ -249,34 +288,52 @@ def apply_query_guardrails(tool_name: str, arguments: dict, question: str) -> di
         model = "sale.order"
         payload["model"] = "sale.order"
 
+    # Regla de negocio: cuando el usuario pide órdenes (ventas/compras) que tengan facturas,
+    # no se debe cambiar a account.move.
+    if has_orders_with_invoice_terms:
+        if has_sales_terms and not has_purchase_terms:
+            model = "sale.order"
+            payload["model"] = "sale.order"
+        elif has_purchase_terms and not has_sales_terms:
+            model = "purchase.order"
+            payload["model"] = "purchase.order"
+
     period = detect_period_range(question)
     date_field = _date_field_for_model(model) if model else None
-    if period and date_field:
+    if period and date_field and not _has_date_range_for_field(domain, date_field):
         start, end = period
-        domain = _strip_domain_clauses(domain, {date_field}, {">", ">=", "<", "<=", "="})
-        domain = append_domain(domain, [[date_field, ">=", str(start)], [date_field, "<=", str(end)]])
+        domain = append_domain(domain, _date_range_clauses(date_field, start, end))
 
     min_amount = _extract_min_amount(question)
     if min_amount is not None and model in ("sale.order", "purchase.order", "account.move"):
         domain = _strip_domain_clauses(domain, {"amount_total"}, {">", ">=", "<", "<=", "="})
         domain = append_domain(domain, [["amount_total", ">=", min_amount]])
 
-    if model == "purchase.order" and _contains_any(q, ["compra", "compras", "proveedor", "orden de compra", "ordenes de compra"]):
+    if model == "purchase.order" and _contains_any(q, purchase_terms):
         if not _has_domain_clause(domain, "state"):
             domain = append_domain(domain, [["state", "in", ["purchase", "done"]]])
 
-    if model == "sale.order" and _contains_any(q, ["venta", "ventas", "pedido", "pedidos", "vendedor"]):
+    if model == "sale.order" and _contains_any(q, sales_terms + ["vendedor"]):
         if not _has_domain_clause(domain, "state"):
             if has_pending_terms:
                 domain = append_domain(domain, [["state", "in", ["draft", "sent"]]])
             else:
                 domain = append_domain(domain, [["state", "in", ["sale", "done"]]])
 
+    if model in ("sale.order", "purchase.order") and has_orders_with_invoice_terms:
+        domain = _strip_domain_clauses(domain, {"invoice_status"}, {"=", "!=", "in"})
+        domain = append_domain(domain, [["invoice_status", "!=", "no"]])
+
     if model == "account.move" and not _has_domain_clause(domain, "move_type"):
-        if _contains_any(q, ["compra", "compras", "proveedor", "orden de compra"]):
+        if _contains_any(q, purchase_terms):
             domain = append_domain(domain, [["move_type", "in", ["in_invoice", "in_refund"]]])
-        elif _contains_any(q, ["venta", "ventas", "cliente", "clientes", "cobro", "cobros", "factura", "facturas", "emitida", "emitidas"]):
+        elif _contains_any(q, sales_terms + ["cliente", "clientes", "cobro", "cobros"] + invoice_terms):
             domain = append_domain(domain, [["move_type", "in", ["out_invoice", "out_refund"]]])
+
+    if model == "stock.picking" and _contains_any(q, ["picking", "pickings"]):
+        if _contains_any(q, ["pendiente", "pendientes", "validar", "validacion", "validación"]):
+            if not _has_domain_clause(domain, "state"):
+                domain = append_domain(domain, [["state", "in", ["assigned", "waiting", "partially_available"]]])
 
     # Regla de negocio: "emitida/publicada" implica documento posteado.
     if model == "account.move" and _contains_any(q, ["emitida", "emitidas", "publicada", "publicadas"]):

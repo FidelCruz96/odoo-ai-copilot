@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from agents.agent.tool_schemas import validate_tool_arguments
 from tools.odoo_get_tool import query_odoo, get_schema
 
 TOOL_MAP = {
@@ -14,4 +15,7 @@ TOOL_MAP = {
 def execute_tool(tool_name: str, arguments: dict):
     if tool_name not in TOOL_MAP:
         return {"error": f"tool_not_found:{tool_name}"}
-    return TOOL_MAP[tool_name](**arguments)
+    validated_arguments, validation_error = validate_tool_arguments(tool_name, arguments)
+    if validation_error:
+        return validation_error
+    return TOOL_MAP[tool_name](**validated_arguments)

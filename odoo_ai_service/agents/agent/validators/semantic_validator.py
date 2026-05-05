@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 SEMANTIC_RULES = {
+    "list_ultimas_ventas_con_factura": {
+        "tool": "query_odoo_search",
+        "model": "sale.order",
+        "required_orderby": "date_order desc",
+    },
+    "list_ultimas_compras_con_factura": {
+        "tool": "query_odoo_search",
+        "model": "purchase.order",
+        "required_orderby": "date_order desc",
+    },
     "ultimos_clientes_creados": {
         "tool": "query_odoo_search",
         "model": "res.partner",

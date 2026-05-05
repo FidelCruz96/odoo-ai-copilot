@@ -67,7 +67,15 @@ def evaluate_metrics(metrics: dict[str, Any]) -> None:
         warnings.append("high_latency")
     if tokens_input > 3200:
         warnings.append("high_tokens")
-    if tool_calls > 2:
+    high_tool_calls_threshold = 2
+    intent_name = metrics.get("intent_detected")
+    if metrics.get("route_selected") == "deterministic":
+        if intent_name == "resumen_operativo_hoy":
+            high_tool_calls_threshold = 4
+        elif intent_name == "count_pickings_por_estado":
+            high_tool_calls_threshold = 3
+
+    if tool_calls > high_tool_calls_threshold:
         warnings.append("high_tool_calls")
 
     if metrics.get("entity_consistent") is False:
@@ -84,6 +92,20 @@ def evaluate_metrics(metrics: dict[str, Any]) -> None:
 def update_metrics_from_tool(metrics: dict, tool_name: str, arguments: dict) -> None:
     if not isinstance(arguments, dict):
         return
+
+    trace_row = {
+        "tool": tool_name,
+        "model": arguments.get("model"),
+        "domain": arguments.get("domain"),
+        "fields": arguments.get("fields"),
+        "orderby": arguments.get("orderby"),
+        "limit": arguments.get("limit"),
+    }
+    tool_trace = metrics.get("tool_trace")
+    if not isinstance(tool_trace, list):
+        tool_trace = []
+    tool_trace.append(trace_row)
+    metrics["tool_trace"] = tool_trace[-20:]
 
     model = arguments.get("model")
     if model:

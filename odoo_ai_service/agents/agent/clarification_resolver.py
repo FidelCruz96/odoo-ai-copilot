@@ -113,6 +113,25 @@ def _should_clarify_count_vs_list(text: str) -> bool:
     if not _contains_any(text, ambiguity_terms):
         return False
 
+    # No aclarar cuando la intención ya es específica para flujos determinísticos del demo.
+    deterministic_rank = (
+        "cliente" in text
+        and "factura" in text
+        and _contains_any(text, ["vencida", "vencidas", "atrasada", "atrasadas"])
+        and _contains_any(text, ["mas", "más", "top"])
+    )
+    deterministic_purchase_pending = (
+        _contains_any(text, ["orden de compra", "ordenes de compra", "órdenes de compra", "compra", "compras"])
+        and _contains_any(text, ["recepcion", "recepción", "por recibir"])
+    )
+    deterministic_picking_pending = (
+        _contains_any(text, ["picking", "pickings"])
+        and _contains_any(text, ["validar", "validacion", "validación"])
+        and "hoy" in text
+    )
+    if deterministic_rank or deterministic_purchase_pending or deterministic_picking_pending:
+        return False
+
     if _has_count_intent_terms(text) or _has_list_intent_terms(text):
         return False
 
@@ -266,6 +285,46 @@ def _find_rule_by_name(rule_name: str) -> dict[str, Any] | None:
     return None
 
 
+def _match_dynamic_option(answer_text: str, option: dict[str, Any]) -> bool:
+    if not isinstance(option, dict):
+        return False
+    text = _normalize_text(answer_text)
+    if not text:
+        return False
+    candidates = []
+    for key in ("key", "value", "label", "display_name"):
+        value = option.get(key)
+        if isinstance(value, str) and value.strip():
+            candidates.append(_normalize_text(value))
+    for candidate in candidates:
+        if not candidate:
+            continue
+        if text == candidate:
+            return True
+        if len(text) >= 5 and candidate in text:
+            return True
+        if len(candidate) >= 8 and text in candidate:
+            return True
+
+    option_id = option.get("id")
+    if isinstance(option_id, int):
+        if re.search(rf"\b{option_id}\b", text):
+            return True
+
+    # Fallback semántico conservador: requiere keyword de modelo + token distintivo.
+    model = _normalize_text(option.get("model") if isinstance(option.get("model"), str) else "")
+    display = _normalize_text(option.get("display_name") if isinstance(option.get("display_name"), str) else "")
+    distinctive_tokens = [
+        tok for tok in re.findall(r"[a-z0-9]{3,}", display)
+        if tok not in {"venta", "compra", "pedido", "orden", "id"}
+    ]
+    if model == "purchase.order" and "compra" in text:
+        return any(tok in text for tok in distinctive_tokens)
+    if model == "sale.order" and ("venta" in text or "pedido" in text):
+        return any(tok in text for tok in distinctive_tokens)
+    return False
+
+
 def detect_clarification_needed(question: str, memory: dict[str, Any] | None) -> dict[str, Any] | None:
     if not question:
         return None
@@ -295,6 +354,34 @@ def resolve_pending_clarification(question: str, memory: dict[str, Any] | None) 
     pending = memory.get("pending_clarification")
     if not isinstance(pending, dict):
         return None
+
+    if pending.get("name") == "entity_followup_scope":
+        options = pending.get("options") or []
+        for option in options:
+            if _match_dynamic_option(question, option):
+                model = option.get("model")
+                entity_id = option.get("id")
+                display_name = option.get("display_name") or option.get("label")
+                selected_entity = None
+                if isinstance(model, str) and isinstance(entity_id, int):
+                    selected_entity = {
+                        "model": model,
+                        "id": entity_id,
+                        "display_name": display_name,
+                        "fields": {"name": display_name} if isinstance(display_name, str) else {},
+                    }
+                return {
+                    "resolved": True,
+                    "rewritten_question": pending.get("original_question") or "",
+                    "choice": option.get("key"),
+                    "rule_name": pending.get("name"),
+                    "selected_entity": selected_entity,
+                }
+        return {
+            "resolved": False,
+            "question": pending.get("question") or "¿A qué documento te refieres?",
+            "rule_name": pending.get("name"),
+        }
 
     rule = _find_rule_by_name(pending.get("name"))
     if not rule:

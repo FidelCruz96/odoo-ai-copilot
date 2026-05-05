@@ -83,6 +83,17 @@ def normalize_orderby(orderby: str):
         _agg, field_name, direction = m.groups()
         return f"{field_name.strip()} {direction.lower()}"
 
+    m2 = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*):(sum|avg|min|max|count)\s+(asc|desc)$", value, re.IGNORECASE)
+    if m2:
+        field_name, _agg, direction = m2.groups()
+        return f"{field_name.strip()} {direction.lower()}"
+
+    # Permite alias comunes de agregación: amount_total_sum desc -> amount_total desc
+    m3 = re.match(r"^([a-zA-Z_][a-zA-Z0-9_]*)_(sum|avg|min|max|count)\s+(asc|desc)$", value, re.IGNORECASE)
+    if m3:
+        field_name, _agg, direction = m3.groups()
+        return f"{field_name.strip()} {direction.lower()}"
+
     return value
 
 

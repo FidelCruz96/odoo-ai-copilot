@@ -40,7 +40,12 @@ def build_entities(question: str, top_n: int | None = None) -> dict:
 
     entities["date_start"] = str(date_start)
     entities["date_end"] = str(date_end)
+    entities["date_end_next"] = str(date_end + timedelta(days=1))
     entities["today"] = str(date.today())
+    entities["today_start"] = f"{date.today()} 00:00:00"
+    entities["tomorrow_start"] = f"{date.today() + timedelta(days=1)} 00:00:00"
+    entities["month_start"] = str(date.today().replace(day=1))
+    entities["month_end"] = str((date.today().replace(day=1) + timedelta(days=32)).replace(day=1) - timedelta(days=1))
     if top_n is None:
         m = re.search(r"\\btop\\s+(\\d+)\\b", (question or "").lower())
         if m:
@@ -125,6 +130,22 @@ def build_intent_plan(intent_name: str, entities: dict) -> dict | None:
                 "model": spec.model,
                 "domain": domain,
             }
+        }
+
+    if spec.operation == "summary_operativo":
+        return {
+            "tool": "summary_operativo_hoy",
+            "arguments": {
+                "today": entities.get("today"),
+                "today_start": entities.get("today_start"),
+                "tomorrow_start": entities.get("tomorrow_start"),
+            },
+        }
+
+    if spec.operation == "summary_pickings_estado":
+        return {
+            "tool": "summary_pickings_por_estado",
+            "arguments": {},
         }
 
     return None

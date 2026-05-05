@@ -3,25 +3,28 @@ import logging
 import os
 import time
 import re
+import uuid
 from datetime import date, timedelta
 
-from openai import RateLimitError, APIError, APIConnectionError
-
-from llm.llm_client import call_llm
-from tools.tool_definitions import tools
-
 from .execution.tool_executor import execute_tool
-from .execution.result_compressor import compress_tool_result
-from .execution.session_state import SessionState
-from .clarification_resolver import detect_clarification_needed, resolve_pending_clarification
+from .clarification_resolver import CLARIFICATION_RULES, detect_clarification_needed, resolve_pending_clarification
+from .agent_rules import get_explicit_doc_regex, get_entity_hint_tokens, get_invoice_scope_patterns
 from .intents.intent_matcher import detect_intent, detect_intent_family, detect_catalog_intent
 from .intents.planner import build_entities, build_intent_plan
 from .intents.semantic_frame import build_semantic_frame, resolve_intent_variant, apply_frame_to_plan
-from .intents.defaults import apply_intent_defaults, apply_query_guardrails
-from .memory_store import get_last_entity, get_session_memory, set_pending_clarification, update_last_entity
-from .reference_resolver import resolve_followup
-from .validators.domain_validator import normalize_domain_operators, validate_domain
-from .validators.schema_validator import get_model_schema, validate_against_schema
+from .intents.defaults import apply_intent_defaults
+from .memory_store import (
+    get_last_entity,
+    get_session_memory,
+    set_pending_clarification,
+    update_last_entity,
+    set_last_ui_entity,
+)
+from .prompt_builder import build_date_context_prompt, compress_context, family_prompt_path, load_prompt
+from .reference_resolver import resolve_followup, needs_followup_clarification
+from .routes import AgentRoute
+from .tool_loop import ToolLoopCallbacks, run_tool_guided_loop
+from .tracing import log_agent_event
 from .validators.semantic_validator import validate_plan_semantics
 from .metrics.telemetry import evaluate_metrics, update_metrics_from_tool, update_quality_metrics_from_tool_result
 
@@ -31,79 +34,41 @@ DEFAULT_MAX_HISTORY = int(os.getenv("AI_CHAT_HISTORY_LIMIT", "8"))
 LLM_COST_INPUT_PER_1K = float(os.getenv("LLM_COST_INPUT_PER_1K", "0"))
 LLM_COST_OUTPUT_PER_1K = float(os.getenv("LLM_COST_OUTPUT_PER_1K", "0"))
 
-PROMPTS_DIR = os.path.join(os.path.dirname(__file__), "prompts")
+EXPLICIT_DOC_RE = get_explicit_doc_regex()
 
 
-def _load_prompt(name: str) -> str:
-    path = os.path.join(PROMPTS_DIR, name)
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().strip() + "\n"
+def _query_has_explicit_entity_hint(question: str) -> bool:
+    if not isinstance(question, str) or not question.strip():
+        return False
+    if EXPLICIT_DOC_RE.search(question):
+        return True
+    q = question.lower()
+    hint_tokens = get_entity_hint_tokens()
+    return any(token in q for token in hint_tokens) and any(ch.isdigit() for ch in question)
 
 
-def _build_date_context_prompt() -> str:
-    today = date.today()
-    year = today.year
-    month = today.month
-
-    month_start = today.replace(day=1)
-    month_end = (
-        today.replace(month=month % 12 + 1, day=1) - timedelta(days=1)
-        if month < 12 else today.replace(day=31)
-    )
-
-    week_start = today - timedelta(days=today.weekday())
-    week_end = week_start + timedelta(days=6)
-
-    last_year_start = today.replace(year=year - 1, month=1, day=1)
-    last_year_end = today.replace(year=year - 1, month=12, day=31)
-
-    last_month_year = year if month > 1 else year - 1
-    last_month = month - 1 if month > 1 else 12
-    last_month_start = today.replace(year=last_month_year, month=last_month, day=1)
-    last_month_end = (
-        today.replace(year=last_month_year, month=last_month % 12 + 1, day=1) - timedelta(days=1)
-        if last_month < 12 else today.replace(year=last_month_year, month=last_month, day=31)
-    )
-
-    year_start = today.replace(month=1, day=1)
-    year_end = today.replace(month=12, day=31)
-
-    return (
-        f"Hoy es {today}.\n"
-        "Rangos útiles:\n"
-        f"- hoy: {today}\n"
-        f"- inicio_mes: {month_start}\n"
-        f"- fin_mes: {month_end}\n"
-        f"- inicio_año: {year_start}\n"
-        f"- fin_año: {year_end}\n"
-        f"- inicio_semana: {week_start}\n"
-        f"- fin_semana: {week_end}\n"
-        f"- año_pasado_inicio: {last_year_start}\n"
-        f"- año_pasado_fin: {last_year_end}\n"
-        f"- mes_pasado_inicio: {last_month_start}\n"
-        f"- mes_pasado_fin: {last_month_end}\n"
-    )
-
-
-def _family_prompt_path(family: str) -> str | None:
-    mapping = {
-        "ventas": "family_ventas.txt",
-        "compras": "family_compras.txt",
-        "facturacion": "family_facturacion.txt",
-        "clientes": "family_clientes.txt",
-        "productos": "family_productos.txt",
-        "inventario": "family_inventario.txt",
-    }
-    return mapping.get(family)
-
-
-def _compress_context(context: dict | None) -> str | None:
-    if not context:
+def _context_ui_entity(context: dict | None):
+    if not isinstance(context, dict):
+        return None
+    client = context.get("client")
+    if not isinstance(client, dict):
+        return None
+    model = client.get("active_model")
+    raw_id = client.get("active_id")
+    if not model:
         return None
     try:
-        return json.dumps(context, ensure_ascii=False)
+        entity_id = int(raw_id)
     except Exception:
-        return str(context)
+        return None
+    if entity_id <= 0:
+        return None
+    return {
+        "model": str(model),
+        "id": entity_id,
+        "display_name": f"{model} #{entity_id}",
+        "fields": {},
+    }
 
 
 def _dedupe_keep_order(values):
@@ -306,6 +271,307 @@ def _extract_entity_from_tool_result(model: str, result, tool_name: str, argumen
     return None
 
 
+def _extract_entity_from_search_result(model: str, result, arguments: dict | None = None):
+    if not model or model not in {"sale.order", "purchase.order", "account.move", "res.partner"}:
+        return None
+    if not isinstance(result, list) or len(result) != 1 or not isinstance(result[0], int):
+        return None
+    args = arguments if isinstance(arguments, dict) else {}
+    domain = args.get("domain")
+    display_name = None
+    if isinstance(domain, list):
+        for clause in domain:
+            if not (isinstance(clause, (list, tuple)) and len(clause) == 3):
+                continue
+            field, operator, value = clause
+            if operator != "=":
+                continue
+            if field in ("name", "display_name", "invoice_origin", "ref") and isinstance(value, str) and value.strip():
+                display_name = value.strip()
+                break
+    if not display_name:
+        display_name = f"ID {result[0]}"
+    return {
+        "model": model,
+        "id": result[0],
+        "display_name": display_name,
+        "fields": {"name": display_name},
+    }
+
+
+def _hydrate_entity_display_name(entity: dict | None) -> dict | None:
+    if not isinstance(entity, dict):
+        return entity
+    model = entity.get("model")
+    entity_id = entity.get("id")
+    if not isinstance(model, str) or not isinstance(entity_id, int):
+        return entity
+
+    current_name = entity.get("display_name")
+    if isinstance(current_name, str) and current_name.strip() and not current_name.strip().lower().startswith("id "):
+        return entity
+
+    try:
+        read_result = execute_tool(
+            "query_odoo_read",
+            {"model": model, "ids": [entity_id], "fields": ["name", "display_name", "ref", "invoice_origin"]},
+        )
+    except Exception:
+        return entity
+
+    if not isinstance(read_result, list) or not read_result:
+        return entity
+    row = read_result[0]
+    if not isinstance(row, dict):
+        return entity
+
+    resolved_name = row.get("name") or row.get("display_name") or row.get("ref") or row.get("invoice_origin")
+    if not (isinstance(resolved_name, str) and resolved_name.strip()):
+        return entity
+
+    output = dict(entity)
+    output["display_name"] = resolved_name.strip()
+    fields = dict(output.get("fields") or {})
+    fields.update({k: v for k, v in row.items() if k != "id"})
+    output["fields"] = fields
+    return output
+
+
+def _strip_domain_field(domain: list | None, field_name: str) -> list:
+    rows = []
+    for clause in domain or []:
+        if isinstance(clause, (list, tuple)) and len(clause) == 3 and clause[0] == field_name:
+            continue
+        rows.append(clause)
+    return rows
+
+
+def _dedupe_domain_rows(domain: list | None) -> list:
+    if not isinstance(domain, list):
+        return []
+    out = []
+    seen = set()
+    for clause in domain:
+        try:
+            key = json.dumps(clause, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            key = str(clause)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(clause)
+    return out
+
+
+def _looks_like_generic_context_name(value: str | None, source_model: str | None = None, source_id: int | None = None) -> bool:
+    if not isinstance(value, str):
+        return True
+    text = value.strip()
+    if not text:
+        return True
+    lower = text.lower()
+    if lower.startswith("id "):
+        return True
+    if isinstance(source_model, str) and isinstance(source_id, int):
+        if lower == f"{source_model.lower()} #{source_id}":
+            return True
+    return False
+
+
+def _resolve_related_source_name(plan: dict, metrics: dict) -> str | None:
+    source_model = plan.get("source_model")
+    source_id = plan.get("source_id")
+    source_display_name = plan.get("source_display_name")
+
+    if not isinstance(source_model, str) or not isinstance(source_id, int):
+        return source_display_name if isinstance(source_display_name, str) else None
+
+    if isinstance(source_display_name, str) and source_display_name.strip():
+        if not _looks_like_generic_context_name(source_display_name, source_model, source_id):
+            return source_display_name.strip()
+
+    read_args = {
+        "model": source_model,
+        "ids": [source_id],
+        "fields": ["name"],
+    }
+    update_metrics_from_tool(metrics, "query_odoo_read", read_args)
+    metrics["tool_calls"] += 1
+    metrics["tools_used"].append("query_odoo_read")
+    read_result = execute_tool("query_odoo_read", read_args)
+    update_quality_metrics_from_tool_result(metrics, "query_odoo_read", read_args, read_result)
+    if isinstance(read_result, list) and read_result:
+        row = read_result[0]
+        if isinstance(row, dict):
+            resolved_name = row.get("name")
+            if isinstance(resolved_name, str) and resolved_name.strip():
+                return resolved_name.strip()
+
+    if isinstance(source_display_name, str) and source_display_name.strip():
+        return source_display_name.strip()
+    return None
+
+
+def _default_read_fields_for_model(model_name: str | None) -> list[str]:
+    mapping = {
+        "sale.order": ["name", "partner_id", "date_order", "amount_total", "state"],
+        "purchase.order": ["name", "partner_id", "date_order", "amount_total", "state"],
+        "account.move": ["name", "partner_id", "invoice_date", "amount_total", "state", "move_type"],
+        "sale.order.line": ["product_id", "product_uom_qty", "price_unit", "price_subtotal"],
+        "purchase.order.line": ["product_id", "product_qty", "price_unit", "price_subtotal"],
+        "res.partner": ["name", "email", "phone", "mobile", "vat"],
+    }
+    return list(mapping.get(model_name, ["name"]))
+
+
+def _normalize_read_fields_with_schema(arguments: dict, model_info: dict | None) -> dict:
+    if not isinstance(arguments, dict):
+        return arguments
+    payload = dict(arguments)
+    model_name = payload.get("model")
+    model_fields = (model_info or {}).get("fields") if isinstance(model_info, dict) else {}
+    model_fields = model_fields if isinstance(model_fields, dict) else {}
+
+    def _is_valid(field_name: str) -> bool:
+        if not isinstance(field_name, str):
+            return False
+        base = field_name.split(":", 1)[0].strip()
+        if not base:
+            return False
+        if not model_fields:
+            return ":" not in field_name
+        return base in model_fields and ":" not in field_name
+
+    raw_fields = payload.get("fields")
+    normalized = []
+    if isinstance(raw_fields, list) and raw_fields:
+        for field_name in raw_fields:
+            if not _is_valid(field_name):
+                continue
+            base = field_name.split(":", 1)[0].strip()
+            if base not in normalized:
+                normalized.append(base)
+
+    if not normalized:
+        for field_name in _default_read_fields_for_model(model_name):
+            if _is_valid(field_name):
+                base = field_name.split(":", 1)[0].strip()
+                if base not in normalized:
+                    normalized.append(base)
+
+    payload["fields"] = normalized or ["name"]
+    return payload
+
+
+def _pick_invoice_source_entity(memory: dict | None):
+    if not isinstance(memory, dict):
+        return None
+    for key in ("last_explicit_entity", "primary_entity", "last_ui_entity", "last_inferred_entity", "last_entity"):
+        entity = memory.get(key)
+        if not isinstance(entity, dict):
+            continue
+        model = entity.get("model")
+        entity_id = entity.get("id")
+        if model in ("sale.order", "purchase.order") and isinstance(entity_id, int):
+            return entity
+    return None
+
+
+def _is_entity_scoped_invoice_query(question: str) -> bool:
+    q = (question or "").lower()
+    if _query_has_explicit_entity_hint(question):
+        return True
+    scoped_patterns = get_invoice_scope_patterns()
+    return any(pattern in q for pattern in scoped_patterns)
+
+
+def _enforce_invoice_semantics(arguments: dict, question: str, memory: dict | None, tool_name: str, model_info: dict | None):
+    if not isinstance(arguments, dict):
+        return arguments
+    if tool_name not in ("query_odoo_search", "query_odoo_group", "query_odoo_count"):
+        return arguments
+    if arguments.get("model") != "account.move":
+        return arguments
+
+    payload = dict(arguments)
+    domain = list(payload.get("domain") or [])
+    q = (question or "").lower()
+    if not any(token in q for token in ("factura", "facturas", "comprobante", "comprobantes", "invoice")):
+        return payload
+
+    source_entity = _pick_invoice_source_entity(memory)
+    if source_entity and _is_entity_scoped_invoice_query(question):
+        source_model = source_entity.get("model")
+        source_name = source_entity.get("display_name")
+        if not isinstance(source_name, str) or not source_name.strip():
+            fields = source_entity.get("fields")
+            if isinstance(fields, dict):
+                source_name = fields.get("name")
+        if isinstance(source_name, str) and source_name.strip():
+            domain = _strip_domain_field(domain, "invoice_origin")
+            domain.append(["invoice_origin", "=", source_name.strip()])
+
+        move_types = None
+        if source_model == "purchase.order":
+            move_types = ["in_invoice", "in_refund"]
+        elif source_model == "sale.order":
+            move_types = ["out_invoice", "out_refund"]
+        if move_types:
+            domain = _strip_domain_field(domain, "move_type")
+            domain.append(["move_type", "in", move_types])
+
+    model_fields = (model_info or {}).get("fields") if isinstance(model_info, dict) else {}
+    model_fields = model_fields if isinstance(model_fields, dict) else {}
+    if model_fields:
+        cleaned = []
+        for clause in domain:
+            if not (isinstance(clause, (list, tuple)) and len(clause) == 3):
+                cleaned.append(clause)
+                continue
+            field_name = clause[0]
+            if isinstance(field_name, str) and field_name.split(".", 1)[0] not in model_fields:
+                continue
+            cleaned.append(clause)
+        domain = cleaned
+
+    payload["domain"] = _dedupe_domain_rows(domain)
+    return payload
+
+
+def _clear_resolved_entity_conflicts(memory: dict | None, selected_entity: dict | None) -> dict:
+    payload = dict(memory) if isinstance(memory, dict) else {}
+    if not isinstance(selected_entity, dict):
+        return payload
+    selected_model = selected_entity.get("model")
+    selected_id = selected_entity.get("id")
+    if not selected_model or not isinstance(selected_id, int):
+        return payload
+
+    last_inferred = payload.get("last_inferred_entity")
+    if isinstance(last_inferred, dict):
+        if last_inferred.get("model") != selected_model:
+            payload.pop("last_inferred_entity", None)
+
+    secondary = payload.get("secondary_entity")
+    if isinstance(secondary, dict):
+        if secondary.get("model") in ("sale.order", "purchase.order", "account.move") and secondary.get("model") != selected_model:
+            payload.pop("secondary_entity", None)
+
+    recent = payload.get("recent_entities")
+    if isinstance(recent, list):
+        filtered = []
+        for row in recent:
+            if not isinstance(row, dict):
+                continue
+            model = row.get("model")
+            if model == selected_model:
+                filtered.append(row)
+        if not filtered:
+            filtered = [{"model": selected_model, "id": selected_id, "display_name": selected_entity.get("display_name")}]
+        payload["recent_entities"] = filtered[-5:]
+    return payload
+
+
 def _followup_read_fields(model: str):
     fields_by_model = {
         "purchase.order": ["name", "partner_id", "date_order", "amount_total", "state"],
@@ -408,14 +674,52 @@ def _format_related_followup_answer(plan: dict, rows):
             lines.append(" - ".join(parts))
         return "\n".join(lines)
 
+    if intent == "related_sales":
+        if not isinstance(rows, list) or not rows:
+            return f"No encontré ventas relacionadas con {source_label}."
+
+        lines = [f"Ventas relacionadas con {source_label}:"]
+        for index, row in enumerate(rows[:10], start=1):
+            name = row.get("name") or f"ID {row.get('id')}"
+            partner = row.get("partner_id")
+            partner_name = partner[1] if isinstance(partner, (list, tuple)) and len(partner) >= 2 else "-"
+            date_value = row.get("date_order") or "-"
+            amount = row.get("amount_total", "-")
+            state = row.get("state", "-")
+            lines.append(
+                f"{index}. {name} | Cliente: {partner_name} | Fecha: {date_value} | Monto: {amount} | Estado: {state}"
+            )
+        return "\n".join(lines)
+
     return "No encontré información relacionada."
 
 
 def _execute_related_followup(plan: dict, question: str, metrics: dict):
     search_plan = plan.get("search") or {}
+    intent = plan.get("intent")
+    source_model = plan.get("source_model")
+    domain = list(search_plan.get("domain") or [])
+
+    if intent in ("invoices", "related_sales"):
+        source_name = _resolve_related_source_name(plan, metrics)
+        if isinstance(source_name, str) and source_name.strip():
+            plan["source_display_name"] = source_name.strip()
+            if intent == "invoices":
+                domain = _strip_domain_field(domain, "invoice_origin")
+                domain.append(["invoice_origin", "=", source_name.strip()])
+                if source_model == "purchase.order":
+                    domain = _strip_domain_field(domain, "move_type")
+                    domain.append(["move_type", "in", ["in_invoice", "in_refund"]])
+                elif source_model == "sale.order":
+                    domain = _strip_domain_field(domain, "move_type")
+                    domain.append(["move_type", "in", ["out_invoice", "out_refund"]])
+            elif intent == "related_sales":
+                domain = _strip_domain_field(domain, "rt_purchase_order")
+                domain.append(["rt_purchase_order", "=", source_name.strip()])
+
     search_args = {
         "model": search_plan.get("model"),
-        "domain": search_plan.get("domain") or [],
+        "domain": _dedupe_domain_rows(domain),
     }
     update_metrics_from_tool(metrics, "query_odoo_search", search_args)
     metrics["tool_calls"] += 1
@@ -611,6 +915,144 @@ def _format_read_group_rows(rows: list, groupby: list, preferred_metric_fields: 
     return "\n".join(lines)
 
 
+
+def _extract_group_count(row: dict, group_field: str) -> int:
+    if not isinstance(row, dict):
+        return 0
+    raw = row.get("__count")
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    alias = f"{group_field}_count"
+    raw = row.get(alias)
+    if isinstance(raw, (int, float)):
+        return int(raw)
+    for key, value in row.items():
+        if key.endswith("_count") and isinstance(value, (int, float)):
+            return int(value)
+    return 0
+
+
+def _format_clientes_facturas_vencidas_ranking(rows: list) -> str:
+    if not isinstance(rows, list) or not rows:
+        return "No hay clientes con facturas vencidas para ese criterio."
+
+    lines = ["Clientes con más facturas vencidas:"]
+    for index, row in enumerate(rows[:10], start=1):
+        label = _extract_group_label(row, ["partner_id"])
+        count_value = _extract_group_count(row, "partner_id")
+        pending_amount = row.get("amount_residual")
+        if not isinstance(pending_amount, (int, float)):
+            pending_amount = row.get("amount_total")
+        lines.append(
+            f"{index}. {label} | facturas vencidas: {count_value} | saldo pendiente: {pending_amount}"
+        )
+    return "\n".join(lines)
+
+
+def _execute_operational_summary_today(arguments: dict, metrics: dict) -> str | None:
+    if not isinstance(arguments, dict):
+        return None
+
+    today = arguments.get("today") or str(date.today())
+    today_start = arguments.get("today_start") or f"{today} 00:00:00"
+    tomorrow_start = arguments.get("tomorrow_start") or f"{date.today() + timedelta(days=1)} 00:00:00"
+
+    query_plan = [
+        (
+            "ventas_confirmadas",
+            {
+                "model": "sale.order",
+                "domain": [["state", "in", ["sale", "done"]], ["date_order", ">=", today_start], ["date_order", "<", tomorrow_start]],
+            },
+        ),
+        (
+            "facturas_pendientes",
+            {
+                "model": "account.move",
+                "domain": [
+                    ["move_type", "=", "out_invoice"],
+                    ["state", "=", "posted"],
+                    ["payment_state", "in", ["not_paid", "partial"]],
+                ],
+            },
+        ),
+        (
+            "compras_por_recibir",
+            {
+                "model": "purchase.order",
+                "domain": [["state", "in", ["purchase", "done"]], ["receipt_status", "not in", ["full", "2_received"]]],
+            },
+        ),
+        (
+            "pickings_por_validar",
+            {
+                "model": "stock.picking",
+                "domain": [
+                    ["state", "in", ["assigned", "waiting", "partially_available"]],
+                    ["scheduled_date", ">=", today_start],
+                    ["scheduled_date", "<", tomorrow_start],
+                ],
+            },
+        ),
+    ]
+
+    values: dict[str, int] = {}
+    for key, arguments_count in query_plan:
+        update_metrics_from_tool(metrics, "query_odoo_count", arguments_count)
+        metrics["tool_calls"] += 1
+        metrics["tools_used"].append("query_odoo_count")
+        result = execute_tool("query_odoo_count", arguments_count)
+        update_quality_metrics_from_tool_result(metrics, "query_odoo_count", arguments_count, result)
+        if isinstance(result, dict) and "error" in result:
+            metrics["tool_success"] = False
+            return None
+        try:
+            values[key] = int(result or 0)
+        except Exception:
+            values[key] = 0
+
+    return (
+        f"Resumen operativo de hoy ({today}):\n"
+        f"- Ventas confirmadas hoy: {values.get('ventas_confirmadas', 0)}\n"
+        f"- Facturas pendientes de cobro: {values.get('facturas_pendientes', 0)}\n"
+        f"- Órdenes de compra por recibir: {values.get('compras_por_recibir', 0)}\n"
+        f"- Pickings pendientes de validar: {values.get('pickings_por_validar', 0)}"
+    )
+
+
+def _execute_pickings_status_summary(arguments: dict, metrics: dict) -> str | None:
+    _ = arguments  # flujo determinístico sin parámetros variables por ahora
+    query_plan = [
+        ("en_espera", {"model": "stock.picking", "domain": [["state", "=", "waiting"]]}),
+        (
+            "disponible",
+            {"model": "stock.picking", "domain": [["state", "in", ["assigned", "partially_available"]]]},
+        ),
+        ("hecho", {"model": "stock.picking", "domain": [["state", "=", "done"]]}),
+    ]
+
+    values: dict[str, int] = {}
+    for key, arguments_count in query_plan:
+        update_metrics_from_tool(metrics, "query_odoo_count", arguments_count)
+        metrics["tool_calls"] += 1
+        metrics["tools_used"].append("query_odoo_count")
+        result = execute_tool("query_odoo_count", arguments_count)
+        update_quality_metrics_from_tool_result(metrics, "query_odoo_count", arguments_count, result)
+        if isinstance(result, dict) and "error" in result:
+            metrics["tool_success"] = False
+            return None
+        try:
+            values[key] = int(result or 0)
+        except Exception:
+            values[key] = 0
+
+    return (
+        "Conteo de pickings por estado:\n"
+        f"- En espera: {values.get('en_espera', 0)}\n"
+        f"- Disponible: {values.get('disponible', 0)}\n"
+        f"- Hecho: {values.get('hecho', 0)}"
+    )
+
 def _format_read_group_answer(row: dict, groupby: list, preferred_metric_fields: list[str] | None = None) -> str:
     if not isinstance(row, dict):
         return "No hay datos."
@@ -657,18 +1099,33 @@ def _format_deterministic_read_answer(intent_name: str | None, model: str | None
             )
         return "\n".join(lines)
 
-    if model in ("sale.order", "purchase.order"):
-        header = "Órdenes encontradas:"
+    if model == "sale.order":
+        header = "Órdenes de venta encontradas:"
         lines = [header]
         for index, row in enumerate(rows[:20], start=1):
             name = row.get("name") or f"ID {row.get('id')}"
             partner = row.get("partner_id")
-            partner_name = partner[1] if isinstance(partner, (list, tuple)) and len(partner) >= 2 else "-"
+            partner_name = partner[1] if isinstance(partner, (list, tuple)) and len(partner) >= 2 else "Sin cliente"
             date_value = row.get("date_order") or "-"
             amount = row.get("amount_total", "-")
             state = row.get("state", "-")
             lines.append(
-                f"{index}. {name} | Contacto: {partner_name} | Fecha: {date_value} | Monto: {amount} | Estado: {state}"
+                f"{index}. {name} | Cliente: {partner_name} | Fecha: {date_value} | Monto: {amount} | Estado: {state}"
+            )
+        return "\n".join(lines)
+
+    if model == "purchase.order":
+        header = "Órdenes de compra encontradas:"
+        lines = [header]
+        for index, row in enumerate(rows[:20], start=1):
+            name = row.get("name") or f"ID {row.get('id')}"
+            partner = row.get("partner_id")
+            partner_name = partner[1] if isinstance(partner, (list, tuple)) and len(partner) >= 2 else "Sin proveedor"
+            date_value = row.get("date_order") or "-"
+            amount = row.get("amount_total", "-")
+            state = row.get("state", "-")
+            lines.append(
+                f"{index}. {name} | Proveedor: {partner_name} | Fecha: {date_value} | Monto: {amount} | Estado: {state}"
             )
         return "\n".join(lines)
 
@@ -701,21 +1158,38 @@ def _execute_deterministic_plan(intent_name: str, plan: dict, question: str, met
         logger.warning("Deterministic semantic error: %s", semantic_error)
         return None
 
+    response_memory = dict(memory) if isinstance(memory, dict) else {}
+
+    if tool_name == "summary_operativo_hoy":
+        answer = _execute_operational_summary_today(arguments, metrics)
+        if answer is None:
+            return None, response_memory
+        return answer, response_memory
+    if tool_name == "summary_pickings_por_estado":
+        answer = _execute_pickings_status_summary(arguments, metrics)
+        if answer is None:
+            return None, response_memory
+        return answer, response_memory
+
     update_metrics_from_tool(metrics, tool_name, arguments)
     metrics["tool_calls"] += 1
     metrics["tools_used"].append(tool_name)
     tool_result = execute_tool(tool_name, arguments)
     update_quality_metrics_from_tool_result(metrics, tool_name, arguments, tool_result)
     logger.info("Deterministic result '%s': %s", tool_name, str(tool_result)[:300])
-    response_memory = dict(memory) if isinstance(memory, dict) else {}
+    entity_source = "explicit" if _query_has_explicit_entity_hint(question) else "inferred"
 
     entity = _extract_entity_from_tool_result(arguments.get("model"), tool_result, tool_name, arguments)
+    if not entity and tool_name == "query_odoo_search":
+        entity = _extract_entity_from_search_result(arguments.get("model"), tool_result, arguments)
+        entity = _hydrate_entity_display_name(entity)
     if entity:
         if metrics.get("entity_consistent") is not False:
             metrics["entity_consistent"] = True
-        response_memory = update_last_entity(response_memory, entity, question)
+        response_memory = update_last_entity(response_memory, entity, question, source=entity_source)
 
     if isinstance(tool_result, dict) and "error" in tool_result:
+        metrics["tool_success"] = False
         return None, response_memory
 
     if tool_name == "query_odoo_count":
@@ -738,6 +1212,8 @@ def _execute_deterministic_plan(intent_name: str, plan: dict, question: str, met
             group_count = len(rows)
             avg_value = round(total_value / group_count, 2) if group_count else 0.0
             return f"Promedio por cliente: {avg_value} (clientes: {group_count}).", response_memory
+        if intent_name == "clientes_facturas_vencidas_ranking":
+            return _format_clientes_facturas_vencidas_ranking(rows), response_memory
         return _format_read_group_rows(rows, groupby, preferred_metric_fields=preferred_metric_fields), response_memory
 
     if tool_name == "query_odoo_search" and "read_back" in plan:
@@ -759,24 +1235,478 @@ def _execute_deterministic_plan(intent_name: str, plan: dict, question: str, met
         if entity:
             if metrics.get("entity_consistent") is not False:
                 metrics["entity_consistent"] = True
-            response_memory = update_last_entity(response_memory, entity, question)
+            response_memory = update_last_entity(response_memory, entity, question, source=entity_source)
         formatted = _format_deterministic_read_answer(intent_name, read_args.get("model"), read_result)
         return formatted, response_memory
 
     return None, response_memory
 
 
-def ask_agent(question: str, context: dict | None = None, history: list | None = None, max_iterations: int = 8) -> dict:
+def _find_clarification_rule(rule_name: str | None) -> dict | None:
+    if not rule_name:
+        return None
+    for rule in CLARIFICATION_RULES:
+        if rule.get("name") == rule_name:
+            return rule
+    return None
+
+
+def _entity_model_human_label(model: str | None) -> str:
+    mapping = {
+        "sale.order": "venta",
+        "purchase.order": "compra",
+        "account.move": "factura",
+        "sale.order.line": "línea de venta",
+        "purchase.order.line": "línea de compra",
+    }
+    return mapping.get(model or "", "registro")
+
+
+def _build_followup_pending_clarification(followup_clarification: dict | None, question: str) -> dict | None:
+    if not isinstance(followup_clarification, dict):
+        return None
+    candidates = followup_clarification.get("entity_candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return None
+
+    options = []
+    for index, candidate in enumerate(candidates, start=1):
+        if not isinstance(candidate, dict):
+            continue
+        model = candidate.get("model")
+        entity_id = candidate.get("id")
+        if not isinstance(model, str) or not isinstance(entity_id, int):
+            continue
+        display_name = candidate.get("display_name") or f"ID {entity_id}"
+        model_label = _entity_model_human_label(model)
+        options.append(
+            {
+                "key": f"entity_{index}",
+                "label": f"{model_label.title()} {display_name}",
+                "value": f"{model_label} {display_name}",
+                "model": model,
+                "id": entity_id,
+                "display_name": display_name,
+                "source": candidate.get("source"),
+            }
+        )
+
+    if not options:
+        return None
+
+    return {
+        "name": "entity_followup_scope",
+        "question": followup_clarification.get("question") or "¿A qué documento te refieres?",
+        "original_question": question,
+        "followup_intent": followup_clarification.get("intent"),
+        "options": options,
+    }
+
+
+def _clarification_choice_to_ui(choice_key: str) -> dict:
+    mapping = {
+        "count": {"label": "Solo total", "value": "total"},
+        "list": {"label": "Detalle", "value": "detalle"},
+        "sale_orders": {"label": "Pedidos de venta", "value": "pedidos de venta"},
+        "invoices": {"label": "Facturas emitidas", "value": "facturas emitidas"},
+        "individual": {"label": "Individual", "value": "individual"},
+        "total": {"label": "Acumulado", "value": "acumulado"},
+    }
+    return mapping.get(choice_key, {"label": choice_key.replace("_", " ").title(), "value": choice_key})
+
+
+def _build_ui_clarification(memory: dict | None) -> dict | None:
+    if not isinstance(memory, dict):
+        return None
+    pending = memory.get("pending_clarification")
+    if not isinstance(pending, dict):
+        return None
+
+    rule = _find_clarification_rule(pending.get("name"))
+    question = pending.get("question")
+    options = []
+
+    pending_options = pending.get("options")
+    if isinstance(pending_options, list) and pending_options:
+        for opt in pending_options:
+            if not isinstance(opt, dict):
+                continue
+            key = opt.get("key") or ""
+            label = opt.get("label") or opt.get("display_name") or key
+            value = opt.get("value") or label
+            if not key or not label:
+                continue
+            options.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "value": value,
+                    "model": opt.get("model"),
+                    "id": opt.get("id"),
+                    "display_name": opt.get("display_name"),
+                    "source": opt.get("source"),
+                }
+            )
+
+    if isinstance(rule, dict):
+        question = question or rule.get("question")
+        for choice_key in (rule.get("choices") or {}).keys():
+            choice_ui = _clarification_choice_to_ui(choice_key)
+            options.append({
+                "key": choice_key,
+                "label": choice_ui["label"],
+                "value": choice_ui["value"],
+            })
+
+    return {
+        "required": True,
+        "question": question or "Necesito una precisión para responder mejor.",
+        "options": options,
+    }
+
+
+def _detect_ui_mode(metrics: dict) -> str:
+    if metrics.get("clarification_asked"):
+        return "clarification"
+    if metrics.get("followup_resolved"):
+        return "memory"
+    if metrics.get("intent_detected") and metrics.get("tokens_input", 0) == 0 and metrics.get("tool_calls", 0) > 0:
+        return "deterministic"
+    if metrics.get("tool_calls", 0) > 0:
+        return "tool_call"
+    return "llm"
+
+
+def _build_ui_badges(metrics: dict, mode: str) -> list[str]:
+    badges = []
+    if mode == "clarification":
+        badges.append("Aclaración requerida")
+    elif mode == "memory":
+        badges.append("Memoria")
+    elif mode == "deterministic":
+        badges.append("Determinístico")
+    elif mode == "tool_call":
+        badges.append("Tool call")
+
+    if metrics.get("grounded"):
+        badges.append("Con datos ERP")
+
+    output = []
+    seen = set()
+    for badge in badges:
+        if badge not in seen:
+            output.append(badge)
+            seen.add(badge)
+    return output
+
+
+def _build_ui_context(memory: dict | None) -> dict:
+    if not isinstance(memory, dict):
+        return {"active": "Sin contexto activo"}
+
+    primary = memory.get("primary_entity")
+    if not isinstance(primary, dict):
+        return {"active": "Sin contexto activo"}
+
+    model = primary.get("model")
+    entity_id = primary.get("id")
+    name = primary.get("display_name") or f"{model or 'registro'} #{entity_id or '?'}"
+    pieces = [name]
+
+    fields = primary.get("fields")
+    if isinstance(fields, dict):
+        partner = fields.get("partner_id")
+        if isinstance(partner, (list, tuple)) and len(partner) >= 2:
+            pieces.append(str(partner[1]))
+
+    return {
+        "active": " · ".join([p for p in pieces if p]),
+        "model": model,
+        "id": entity_id,
+    }
+
+
+def _build_ui_navigation(metrics: dict, memory: dict | None) -> dict:
+    model = metrics.get("semantic_model") or metrics.get("model_used")
+    domain = metrics.get("domain_used") if isinstance(metrics.get("domain_used"), list) else []
+    orderby = metrics.get("orderby_used") if isinstance(metrics.get("orderby_used"), str) else None
+    limit = metrics.get("limit_used") if isinstance(metrics.get("limit_used"), int) else None
+
+    payload = {
+        "model": model,
+        "domain": domain,
+        "orderby": orderby,
+        "limit": limit,
+    }
+
+    if isinstance(metrics.get("ui_active_model"), str) and isinstance(metrics.get("ui_active_id"), int):
+        payload["active_model"] = metrics.get("ui_active_model")
+        payload["active_id"] = metrics.get("ui_active_id")
+    elif isinstance(memory, dict):
+        primary = memory.get("primary_entity")
+        primary_model = primary.get("model") if isinstance(primary, dict) else None
+        should_use_memory_entity = bool(metrics.get("memory_hit") or metrics.get("followup_resolved"))
+        if not should_use_memory_entity and isinstance(primary_model, str) and isinstance(model, str):
+            should_use_memory_entity = primary_model == model
+        if isinstance(primary, dict) and should_use_memory_entity:
+            payload["active_model"] = primary.get("model")
+            payload["active_id"] = primary.get("id")
+    return payload
+
+
+def _build_ui_actions(metrics: dict) -> list[dict]:
+    model = metrics.get("semantic_model") or metrics.get("model_used")
+    domain = metrics.get("domain_used") if isinstance(metrics.get("domain_used"), list) else []
+    active_model = metrics.get("ui_active_model")
+    active_id = metrics.get("ui_active_id")
+    orderby = metrics.get("orderby_used") if isinstance(metrics.get("orderby_used"), str) else None
+    limit = metrics.get("limit_used") if isinstance(metrics.get("limit_used"), int) else None
+    actions: list[dict] = []
+
+    if model == "product.product":
+        actions.extend([
+            {
+                "key": "open_products",
+                "label": "Abrir productos",
+                "type": "open_model_list",
+                "model": "product.product",
+                "domain": domain or [["qty_available", "<", 0]],
+                "orderby": orderby,
+                "limit": limit,
+            },
+            {"key": "stock_moves", "label": "Ver movimientos", "prompt": "muéstrame los últimos movimientos de stock"},
+        ])
+    elif model == "sale.order":
+        actions.extend([
+            {
+                "key": "open_sales",
+                "label": "Abrir ventas",
+                "type": "open_model_list",
+                "model": "sale.order",
+                "domain": domain,
+                "orderby": orderby,
+                "limit": limit,
+            },
+            {"key": "open_invoices", "label": "Ver facturas", "prompt": "muéstrame las facturas relacionadas"},
+            {"key": "order_products", "label": "Ver productos", "prompt": "muéstrame sus productos"},
+        ])
+    elif model == "account.move":
+        actions.extend([
+            {
+                "key": "open_invoices_list",
+                "label": "Abrir facturas",
+                "type": "open_model_list",
+                "model": "account.move",
+                "domain": domain,
+                "orderby": orderby,
+                "limit": limit,
+            },
+            {"key": "due_invoices", "label": "Ver vencimientos", "prompt": "muéstrame las facturas vencidas"},
+            {"key": "invoice_total", "label": "Solo total", "prompt": "dame solo el total"},
+        ])
+
+    if isinstance(active_id, int) and isinstance(active_model, str):
+        actions.insert(0, {
+            "key": "open_active_record",
+            "label": "Abrir registro",
+            "type": "open_record",
+            "model": active_model,
+            "id": active_id,
+        })
+
+    if metrics.get("grounded"):
+        actions.append({"key": "export_csv", "label": "Exportar CSV"})
+
+    output = []
+    seen = set()
+    for action in actions:
+        key = action.get("key")
+        if key and key not in seen:
+            output.append(action)
+            seen.add(key)
+    return output[:4]
+
+
+def _build_ui_suggestions(metrics: dict) -> list[dict]:
+    model = metrics.get("semantic_model") or metrics.get("model_used")
+    if model == "product.product":
+        return [
+            {"label": "Stock negativo", "prompt": "qué productos tienen stock negativo"},
+            {"label": "Sin rotación", "prompt": "qué productos no tienen rotación este mes"},
+            {"label": "Movimientos recientes", "prompt": "últimos movimientos de inventario"},
+        ]
+    if model == "sale.order":
+        return [
+            {"label": "Ventas del mes", "prompt": "ventas del mes"},
+            {"label": "Top clientes", "prompt": "top clientes con ventas este mes"},
+            {"label": "Ventas pendientes", "prompt": "ventas pendientes"},
+        ]
+    return [
+        {"label": "Ventas del mes", "prompt": "ventas del mes"},
+        {"label": "Facturas pendientes", "prompt": "facturas pendientes este mes"},
+        {"label": "Top clientes", "prompt": "top clientes con ventas este mes"},
+        {"label": "Stock negativo", "prompt": "productos con stock negativo"},
+    ]
+
+
+def _build_ui_payload(metrics: dict, memory: dict | None, success: bool, error_type: str | None = None) -> dict:
+    mode = _detect_ui_mode(metrics)
+    clarification = _build_ui_clarification(memory)
+    navigation = _build_ui_navigation(metrics, memory)
+    metrics["ui_active_model"] = navigation.get("active_model")
+    metrics["ui_active_id"] = navigation.get("active_id")
+    return {
+        "mode": mode,
+        "status": "ok" if success else "error",
+        "error_type": error_type,
+        "latency_ms": metrics.get("latency_ms_total"),
+        "badges": _build_ui_badges(metrics, mode),
+        "context": _build_ui_context(memory),
+        "navigation": navigation,
+        "clarification": clarification,
+        "actions": [] if clarification else _build_ui_actions(metrics),
+        "suggestions": _build_ui_suggestions(metrics),
+        "meta": {
+            "intent": metrics.get("intent_detected"),
+            "semantic_action": metrics.get("semantic_action"),
+            "semantic_model": metrics.get("semantic_model"),
+            "warnings": metrics.get("warnings") or [],
+        },
+    }
+
+
+ERROR_CODE_MAP = {
+    "rate_limit": "ERR_RATE_LIMIT",
+    "api_error": "ERR_TOOL_TIMEOUT",
+    "unknown_error": "ERR_INTERNAL",
+    "invalid_ids": "ERR_INVALID_ID",
+    "no_tool_for_data": "ERR_NO_TOOL",
+    "repeated_tool_call": "ERR_REPEATED_TOOL_CALL",
+    "followup_not_found": "ERR_NO_RESULTS",
+    "related_followup_search_error": "ERR_TOOL_EXECUTION",
+    "related_followup_read_error": "ERR_TOOL_EXECUTION",
+    "max_iterations": "ERR_MAX_ITERATIONS",
+}
+
+
+def _map_error_code(error_type: str | None) -> str | None:
+    if not error_type:
+        return None
+    if error_type in ERROR_CODE_MAP:
+        return ERROR_CODE_MAP[error_type]
+    if error_type.startswith("odoo_http_"):
+        return "ERR_TOOL_HTTP"
+    if "schema" in error_type or "invalido" in error_type or "invalid" in error_type:
+        return "ERR_INVALID_FIELD"
+    if "permission" in error_type:
+        return "ERR_PERMISSION_DENIED"
+    if "clarification" in error_type:
+        return "ERR_AMBIGUOUS_CONTEXT"
+    return "ERR_INTERNAL"
+
+
+def _resolve_answer_mode(metrics: dict) -> str:
+    if metrics.get("clarification_asked"):
+        return "clarification_required"
+    if metrics.get("intent_detected") and metrics.get("tokens_input", 0) == 0 and metrics.get("tool_calls", 0) > 0:
+        return "deterministic"
+    if metrics.get("tool_calls", 0) > 0:
+        return "tool_guided"
+    return "fallback_explanatory"
+
+
+def _resolve_answer_type(answer: str, answer_mode: str, success: bool) -> str:
+    if not success:
+        return "error"
+    if answer_mode == "clarification_required":
+        return "clarification"
+    text = (answer or "").strip().lower()
+    if "\n1." in (answer or "") or "resultados:" in text or "|" in (answer or ""):
+        return "table"
+    if text.startswith("total:") or text.startswith("promedio"):
+        return "summary"
+    return "summary"
+
+
+def _build_context_scope(context: dict | None) -> dict:
+    if not isinstance(context, dict):
+        return {}
+    company = context.get("company") if isinstance(context.get("company"), dict) else {}
+    client = context.get("client") if isinstance(context.get("client"), dict) else {}
+    return {
+        "company_id": company.get("id"),
+        "active_model": client.get("active_model"),
+        "active_id": client.get("active_id"),
+        "lang": context.get("lang"),
+        "tz": context.get("tz"),
+    }
+
+
+def _build_response_payload(
+    answer: str,
+    success: bool,
+    error_type: str | None,
+    metrics: dict,
+    response_memory: dict,
+    ui_payload: dict,
+    context: dict | None,
+) -> dict:
+    answer_mode = _resolve_answer_mode(metrics)
+    answer_type = _resolve_answer_type(answer, answer_mode, success)
+    clarification = ui_payload.get("clarification") if isinstance(ui_payload, dict) else None
+    clarification_options = clarification.get("options") if isinstance(clarification, dict) else []
+    actions = ui_payload.get("actions") if isinstance(ui_payload, dict) else []
+
+    return {
+        "answer": answer,
+        "answer_mode": answer_mode,
+        "answer_type": answer_type,
+        "needs_clarification": bool(answer_mode == "clarification_required"),
+        "clarification_options": clarification_options or [],
+        "actions": actions or [],
+        "error_code": _map_error_code(error_type),
+        "request_id": metrics.get("request_id"),
+        "metadata": {
+            "latency_ms": metrics.get("latency_ms_total"),
+            "tools_used": metrics.get("tools_used") or [],
+            "tool_calls": metrics.get("tool_calls"),
+            "tool_trace": metrics.get("tool_trace") or [],
+            "tokens_input": metrics.get("tokens_input"),
+            "tokens_output": metrics.get("tokens_output"),
+            "route_selected": metrics.get("route_selected"),
+            "context_scope": _build_context_scope(context),
+        },
+        "ui": ui_payload,
+        "memory": response_memory,
+    }
+
+
+def ask_agent(question: str, context: dict | None = None, history: list | None = None, max_iterations: int = 3) -> dict:
     start_ts = time.perf_counter()
+    request_id = None
+    if isinstance(context, dict):
+        request_id = context.get("request_id")
+        if not request_id:
+            client = context.get("client")
+            if isinstance(client, dict):
+                request_id = client.get("request_id")
+    if not request_id:
+        request_id = f"req_{uuid.uuid4().hex[:12]}"
+
     metrics = {
+        "request_id": request_id,
         "query": question,
         "tools_used": [],
+        "tool_trace": [],
         "tool_calls": 0,
         "iterations": 0,
         "tokens_input": 0,
         "tokens_output": 0,
         "cost": 0.0,
         "success": False,
+        "success_response_emitted": False,
+        "tool_success": None,
+        "partial_failure": False,
         "error_type": None,
         "grounded": False,
         "invalid_id_blocked": False,
@@ -788,12 +1718,31 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         "entity_consistent": None,
         "ranking_preserved": None,
         "response_faithful": None,
+        "route_selected": None,
+        "entity_source_used": None,
+        "entity_candidates": [],
+        "entity_conflict_detected": False,
+        "followup_confidence": None,
+        "clarification_reason": None,
+        "ui_context_overridden": False,
     }
     response_memory = dict(get_session_memory(context))
+    ui_entity = _context_ui_entity(context)
+    if ui_entity:
+        response_memory = set_last_ui_entity(response_memory, ui_entity, source_query="ui_context")
+        metrics["ui_active_model"] = ui_entity.get("model")
+        metrics["ui_active_id"] = ui_entity.get("id")
 
     def _finalize(answer: str, success: bool, error_type: str | None = None):
         metrics["success"] = success
         metrics["error_type"] = error_type
+        metrics["success_response_emitted"] = bool(success)
+        if metrics.get("tool_success") is None:
+            metrics["tool_success"] = True if metrics.get("tool_calls", 0) > 0 else None
+        if isinstance(error_type, str) and metrics.get("tool_calls", 0) > 0:
+            if error_type.startswith("odoo_http_") or "tool" in error_type:
+                metrics["tool_success"] = False
+        metrics["partial_failure"] = bool(metrics.get("success_response_emitted") and metrics.get("tool_success") is False)
         metrics["latency_ms_total"] = int((time.perf_counter() - start_ts) * 1000)
         metrics["cost"] = round(
             (metrics["tokens_input"] / 1000.0) * LLM_COST_INPUT_PER_1K
@@ -809,6 +1758,12 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         metrics.setdefault("limit_used", None)
         metrics.setdefault("entity_consistent", None)
         metrics.setdefault("ranking_preserved", None)
+        metrics.setdefault("entity_source_used", None)
+        metrics.setdefault("entity_candidates", [])
+        metrics.setdefault("entity_conflict_detected", False)
+        metrics.setdefault("followup_confidence", None)
+        metrics.setdefault("clarification_reason", None)
+        metrics.setdefault("ui_context_overridden", False)
         if metrics.get("response_faithful") is None:
             if success and metrics.get("grounded"):
                 metrics["response_faithful"] = True
@@ -817,19 +1772,64 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
 
         evaluate_metrics(metrics)
 
+        ui_payload = _build_ui_payload(metrics, response_memory, success=success, error_type=error_type)
+        payload = _build_response_payload(
+            answer=answer,
+            success=success,
+            error_type=error_type,
+            metrics=metrics,
+            response_memory=response_memory,
+            ui_payload=ui_payload,
+            context=context,
+        )
+        log_agent_event(
+            "finalize",
+            request_id=metrics.get("request_id"),
+            success=success,
+            route_selected=metrics.get("route_selected"),
+            error_type=error_type,
+            tool_calls=metrics.get("tool_calls"),
+            tokens_input=metrics.get("tokens_input"),
+            tokens_output=metrics.get("tokens_output"),
+            latency_ms=metrics.get("latency_ms_total"),
+        )
         logger.info("METRICS %s", json.dumps(metrics, ensure_ascii=False, default=str))
-        return {"answer": answer, "memory": response_memory}
+        logger.info(
+            "RESPONSE %s",
+            json.dumps(
+                {
+                    "request_id": payload.get("request_id"),
+                    "answer_mode": payload.get("answer_mode"),
+                    "answer_type": payload.get("answer_type"),
+                    "needs_clarification": payload.get("needs_clarification"),
+                    "error_code": payload.get("error_code"),
+                },
+                ensure_ascii=False,
+                default=str,
+            ),
+        )
+        return payload
 
     clarification_was_resolved = False
     clarification_result = resolve_pending_clarification(question, response_memory)
     if clarification_result:
         if clarification_result.get("resolved"):
             question = clarification_result["rewritten_question"]
+            selected_entity = clarification_result.get("selected_entity")
+            if isinstance(selected_entity, dict):
+                response_memory = update_last_entity(
+                    response_memory,
+                    selected_entity,
+                    question,
+                    source="explicit",
+                )
+                response_memory = _clear_resolved_entity_conflicts(response_memory, selected_entity)
             response_memory = set_pending_clarification(response_memory, None)
             metrics["clarification_resolved"] = True
             clarification_was_resolved = True
         else:
             metrics["clarification_asked"] = True
+            metrics["route_selected"] = AgentRoute.CLARIFICATION
             return _finalize(clarification_result["question"], success=True)
 
     if not clarification_was_resolved:
@@ -837,7 +1837,10 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         if clarification_needed:
             response_memory = set_pending_clarification(response_memory, clarification_needed)
             metrics["clarification_asked"] = True
+            metrics["route_selected"] = AgentRoute.CLARIFICATION
             return _finalize(clarification_needed["question"], success=True)
+
+    query_has_explicit_entity_hint = _query_has_explicit_entity_hint(question)
 
     deterministic = _try_deterministic_path(question)
     catalog_intent = deterministic["intent"] if deterministic else None
@@ -848,13 +1851,33 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         metrics["semantic_action"] = semantic_frame.get("action")
         metrics["semantic_model"] = semantic_frame.get("model")
 
-    followup = resolve_followup(question, get_last_entity(context))
+    last_entity = get_last_entity({"memory": response_memory})
+    if not clarification_was_resolved:
+        followup_clarification = needs_followup_clarification(question, last_entity, response_memory)
+        if followup_clarification:
+            followup_pending = _build_followup_pending_clarification(followup_clarification, question)
+            if followup_pending:
+                response_memory = set_pending_clarification(response_memory, followup_pending)
+            metrics["entity_candidates"] = followup_clarification.get("entity_candidates") or []
+            metrics["entity_conflict_detected"] = bool(followup_clarification.get("entity_conflict_detected"))
+            metrics["followup_confidence"] = followup_clarification.get("followup_confidence")
+            metrics["clarification_reason"] = followup_clarification.get("reason")
+            metrics["clarification_asked"] = True
+            metrics["route_selected"] = AgentRoute.CLARIFICATION
+            return _finalize(followup_clarification.get("question") or "¿A qué registro te refieres exactamente?", success=True)
+
+    followup = resolve_followup(question, last_entity, response_memory)
     if followup and followup.get("type") == "entity_followup":
+        metrics["route_selected"] = AgentRoute.MEMORY_ENTITY
         metrics["memory_hit"] = True
         metrics["followup_resolved"] = True
         metrics["followup_bypassed_llm"] = True
         if metrics.get("entity_consistent") is not False:
             metrics["entity_consistent"] = True
+        metrics["entity_source_used"] = "last_entity"
+        metrics["entity_candidates"] = []
+        metrics["entity_conflict_detected"] = False
+        metrics["followup_confidence"] = 0.8
         read_args = {
             "model": followup["model"],
             "ids": [followup["id"]],
@@ -871,7 +1894,8 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
             if entity:
                 if metrics.get("entity_consistent") is not False:
                     metrics["entity_consistent"] = True
-                response_memory = update_last_entity(response_memory, entity, question)
+                entity_source = "explicit" if query_has_explicit_entity_hint else "inferred"
+                response_memory = update_last_entity(response_memory, entity, question, source=entity_source)
             return _finalize(
                 _format_followup_answer(followup["model"], tool_result[0], followup.get("display_name")),
                 success=True,
@@ -879,10 +1903,22 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         return _finalize("No encontré el registro solicitado.", success=False, error_type="followup_not_found")
 
     if followup and followup.get("type") == "related_followup":
+        metrics["route_selected"] = AgentRoute.MEMORY_RELATED
         metrics["memory_hit"] = True
         metrics["followup_resolved"] = True
         metrics["followup_bypassed_llm"] = True
         metrics["grounded"] = True
+        metrics["entity_source_used"] = followup.get("entity_source_used")
+        metrics["entity_candidates"] = followup.get("entity_candidates") or []
+        metrics["entity_conflict_detected"] = bool(followup.get("entity_conflict_detected"))
+        metrics["followup_confidence"] = followup.get("followup_confidence")
+        if isinstance(ui_entity, dict) and metrics.get("entity_source_used") == "last_explicit_entity":
+            selected_model = followup.get("source_model")
+            selected_id = followup.get("source_id")
+            if selected_model and isinstance(selected_id, int):
+                metrics["ui_context_overridden"] = (
+                    ui_entity.get("model") != selected_model or ui_entity.get("id") != selected_id
+                )
         if metrics.get("entity_consistent") is not False:
             metrics["entity_consistent"] = True
         answer, error_type = _execute_related_followup(followup, question, metrics)
@@ -895,25 +1931,29 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         )
 
     if deterministic and intent_plan:
+        metrics["route_selected"] = AgentRoute.DETERMINISTIC
         answer, response_memory = _execute_deterministic_plan(catalog_intent, intent_plan, question, metrics, response_memory)
         if answer is not None:
             metrics["grounded"] = True
             return _finalize(answer, success=True)
+        logger.warning("Deterministic path failed for intent '%s'; fallback to LLM without forced plan.", catalog_intent)
+        intent_plan = None
+        catalog_intent = None
 
     family = detect_intent_family(question)
 
-    messages = [{"role": "system", "content": _load_prompt("system_base.txt") }]
-    messages.append({"role": "system", "content": _build_date_context_prompt()})
-    family_prompt = _family_prompt_path(family)
+    messages = [{"role": "system", "content": load_prompt("system_base.txt") }]
+    messages.append({"role": "system", "content": build_date_context_prompt()})
+    family_prompt = family_prompt_path(family)
     if family_prompt:
-        messages.append({"role": "system", "content": _load_prompt(family_prompt)})
+        messages.append({"role": "system", "content": load_prompt(family_prompt)})
 
     if context:
-        ctx_json = _compress_context(context)
+        ctx_json = compress_context(context)
         if ctx_json:
             messages.append({"role": "system", "content": f"Contexto funcional: {ctx_json}"})
     if semantic_frame:
-        frame_json = _compress_context(semantic_frame)
+        frame_json = compress_context(semantic_frame)
         if frame_json:
             messages.append({"role": "system", "content": f"Marco semántico normalizado: {frame_json}"})
 
@@ -950,288 +1990,39 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
 
     messages.append({"role": "user", "content": question})
 
-    schema_cache = {}
-    state = SessionState()
+    def _get_response_memory():
+        return response_memory
 
-    for iteration in range(max_iterations):
-        metrics["iterations"] = iteration + 1
-        logger.info(f"Iteración {iteration + 1}/{max_iterations}")
+    def _set_response_memory(next_memory: dict):
+        nonlocal response_memory
+        response_memory = next_memory
 
-        try:
-            response = call_llm(messages, tools)
-        except RateLimitError:
-            return _finalize(
-                "El servicio de IA está temporalmente saturado por límite de tokens. Intenta nuevamente en unos segundos.",
-                success=False,
-                error_type="rate_limit",
-            )
-        except (APIError, APIConnectionError):
-            return _finalize(
-                "No pude conectar con el servicio de IA. Intenta nuevamente.",
-                success=False,
-                error_type="api_error",
-            )
-        except Exception:
-            return _finalize(
-                "Ocurrió un error inesperado en el servicio de IA.",
-                success=False,
-                error_type="unknown_error",
-            )
+    callbacks = ToolLoopCallbacks(
+        is_data_question=_is_data_question,
+        is_amount_followup=_is_amount_followup,
+        is_count_question=_is_count_question,
+        extract_partner_ids_from_domain=_extract_partner_ids_from_domain,
+        extract_ids_from_domain=_extract_ids_from_domain,
+        normalize_read_group_args=_normalize_read_group_args,
+        normalize_read_fields_with_schema=_normalize_read_fields_with_schema,
+        enforce_invoice_semantics=_enforce_invoice_semantics,
+        detect_avg_group_intent=_detect_avg_group_intent,
+        compute_avg_from_group_rows=_compute_avg_from_group_rows,
+        extract_entity_from_tool_result=_extract_entity_from_tool_result,
+        extract_entity_from_search_result=_extract_entity_from_search_result,
+        hydrate_entity_display_name=_hydrate_entity_display_name,
+        get_response_memory=_get_response_memory,
+        set_response_memory=_set_response_memory,
+    )
 
-        message = response.choices[0].message
-        logger.info(f"LLM RESPONSE: {message}")
-        if hasattr(response, "usage") and response.usage:
-            metrics["tokens_input"] += getattr(response.usage, "prompt_tokens", 0) or 0
-            metrics["tokens_output"] += getattr(response.usage, "completion_tokens", 0) or 0
-
-        if not message.tool_calls:
-            if _is_data_question(question) and not state.used_tool_in_session:
-                return _finalize(
-                    "Para responder necesito consultar Odoo con una herramienta. ¿Puedes reformular o especificar exactamente qué datos necesitas?",
-                    success=False,
-                    error_type="no_tool_for_data",
-                )
-            return _finalize(message.content or "No se obtuvo respuesta.", success=True)
-
-        messages.append(message)
-
-        for tool_call in message.tool_calls:
-            tool_name = tool_call.function.name
-            logger.info(f"TOOL CALL: {tool_name}")
-            metrics["tool_calls"] += 1
-            metrics["tools_used"].append(tool_name)
-
-            if tool_name not in {"get_schema", "query_odoo_search", "query_odoo_read", "query_odoo_group", "query_odoo_count"}:
-                tool_result = f"Error: herramienta '{tool_name}' no encontrada."
-                logger.warning(tool_result)
-            else:
-                try:
-                    arguments = json.loads(tool_call.function.arguments)
-
-                    if intent_plan:
-                        if "read_back" in intent_plan and tool_name == "query_odoo_read":
-                            read_args = dict(intent_plan["read_back"])
-                            read_args["ids"] = arguments.get("ids") or []
-                            arguments = read_args
-                        else:
-                            tool_name = intent_plan["tool"]
-                            arguments = dict(intent_plan["arguments"])
-
-                    if catalog_intent:
-                        arguments = apply_intent_defaults(catalog_intent, arguments, question)
-                        if not (intent_plan and "read_back" in intent_plan and tool_name == "query_odoo_read"):
-                            semantic_error = validate_plan_semantics(catalog_intent, tool_name, arguments)
-                            if semantic_error:
-                                return _finalize(
-                                    "La consulta no cumple las reglas semánticas de la intención. ¿Puedes reformular la pregunta?",
-                                    success=False,
-                                    error_type=semantic_error,
-                                )
-                    else:
-                        arguments = apply_query_guardrails(tool_name, arguments, question)
-
-                    tool_sig = f"{tool_name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
-                    if tool_sig == state.last_tool_sig:
-                        state.repeated_tool_calls += 1
-                    else:
-                        state.repeated_tool_calls = 0
-                    state.last_tool_sig = tool_sig
-
-                    if _is_amount_followup(question) and state.last_partner_ids:
-                        if tool_name in ("query_odoo_search", "query_odoo_group"):
-                            tool_name = "query_odoo_group"
-                            arguments = {
-                                "model": state.last_partner_model or "sale.order",
-                                "domain": [["partner_id", "in", state.last_partner_ids]],
-                                "fields": ["amount_total"],
-                                "groupby": ["partner_id"],
-                                "limit": len(state.last_partner_ids),
-                            }
-
-                    if tool_name == "query_odoo_search" and state.repeated_tool_calls >= 1 and _is_count_question(question):
-                        tool_name = "query_odoo_count"
-
-                    if state.repeated_tool_calls >= 2:
-                        return _finalize(
-                            "Parece que estoy repitiendo la misma consulta. ¿Podrías reformular la pregunta con más detalle?",
-                            success=False,
-                            error_type="repeated_tool_call",
-                        )
-
-                    if state.last_partner_ids and tool_name in ("query_odoo_search", "query_odoo_group", "query_odoo_read"):
-                        domain_ids = _extract_partner_ids_from_domain(arguments.get("domain"))
-                        if domain_ids and not set(domain_ids).issubset(set(state.last_partner_ids)):
-                            metrics["invalid_id_blocked"] = True
-                            metrics["entity_consistent"] = False
-                            return _finalize(
-                                "Necesito los clientes exactos para calcular el monto. ¿Puedes confirmar los clientes o repetir la consulta anterior?",
-                                success=False,
-                                error_type="invalid_ids",
-                            )
-
-                    if tool_name in ("query_odoo_search", "query_odoo_group", "query_odoo_read"):
-                        model = arguments.get("model")
-                        domain_pairs = _extract_ids_from_domain(arguments.get("domain"))
-                        for field, ids in domain_pairs:
-                            key = (model, field)
-                            allowed = state.last_ids_by_model_field.get(key)
-                            if allowed is not None and ids and not set(ids).issubset(allowed):
-                                metrics["invalid_id_blocked"] = True
-                                metrics["entity_consistent"] = False
-                                return _finalize(
-                                    "Necesito los IDs exactos devueltos por una consulta previa. ¿Puedes confirmar los registros o repetir la consulta anterior?",
-                                    success=False,
-                                    error_type="invalid_ids",
-                                )
-
-                    if tool_name == "get_schema":
-                        models = arguments.get("models")
-                        if not models or not isinstance(models, list):
-                            tool_result = "Error de validación: get_schema requiere 'models' como lista de modelos."
-                            logger.error(tool_result)
-                            messages.append({
-                                "role": "tool",
-                                "tool_call_id": tool_call.id,
-                                "content": compress_tool_result(tool_name, tool_result),
-                            })
-                            continue
-
-                    if "domain" in arguments:
-                        arguments["domain"] = normalize_domain_operators(arguments["domain"])
-                        arguments["domain"] = validate_domain(arguments["domain"])
-
-                    if tool_name in ("query_odoo_search", "query_odoo_read", "query_odoo_group", "query_odoo_count"):
-                        model_name = arguments.get("model")
-                        model_info = get_model_schema(schema_cache, model_name)
-                        if tool_name == "query_odoo_group":
-                            arguments = _normalize_read_group_args(arguments, question)
-                        validation_error = validate_against_schema(
-                            {model_name: model_info} if model_info else {},
-                            model_name,
-                            fields=arguments.get("fields"),
-                            groupby=arguments.get("groupby"),
-                            domain=arguments.get("domain"),
-                            orderby=arguments.get("orderby"),
-                        )
-                        if validation_error:
-                            tool_result = f"Error de schema: {validation_error}"
-                            logger.error(tool_result)
-                            raise ValueError(validation_error)
-
-                    update_metrics_from_tool(metrics, tool_name, arguments)
-                    tool_result = execute_tool(tool_name, arguments)
-                    update_quality_metrics_from_tool_result(metrics, tool_name, arguments, tool_result)
-                    logger.info(f"Resultado '{tool_name}': {str(tool_result)[:300]}")
-
-                    state.used_tool_in_session = True
-                    metrics["grounded"] = True
-
-                    if tool_name == "query_odoo_group":
-                        avg_group_intent = _detect_avg_group_intent(question)
-                        if avg_group_intent:
-                            try:
-                                entity_field = avg_group_intent["entity"]
-
-                                if arguments.get("model") in ("sale.order", "purchase.order"):
-                                    value_field = "amount_total"
-                                elif arguments.get("model") == "sale.order.line":
-                                    value_field = "product_uom_qty"
-                                elif arguments.get("model") == "purchase.order.line":
-                                    value_field = "product_qty"
-                                else:
-                                    value_field = "amount_total"
-
-                                stats = _compute_avg_from_group_rows(
-                                    tool_result,
-                                    entity_field=entity_field,
-                                    value_field=value_field,
-                                )
-
-                                if stats and stats["group_count"] > 0:
-                                    tool_result = {
-                                        "metric": "average_by_group",
-                                        "entity": avg_group_intent["label"],
-                                        "entity_field": entity_field,
-                                        "group_count": stats["group_count"],
-                                        "total_value": stats["total_value"],
-                                        "average_value": stats["average_value"],
-                                        "source_model": arguments.get("model"),
-                                        "source_value_field": value_field,
-                                    }
-                                    logger.info("Resultado '%s' postprocess average_by_group: %s", tool_name, str(tool_result)[:300])
-                            except Exception:
-                                logger.exception("avg group postprocess failed")
-
-                    if tool_name == "query_odoo_group":
-                        try:
-                            if arguments.get("model") and "partner_id" in (arguments.get("groupby") or []):
-                                ids = []
-                                for row in (tool_result or []):
-                                    partner_val = row.get("partner_id")
-                                    if isinstance(partner_val, (list, tuple)) and partner_val:
-                                        ids.append(partner_val[0])
-                                if ids:
-                                    state.last_partner_ids = ids
-                                    state.last_partner_model = arguments.get("model")
-                        except Exception:
-                            pass
-
-                    if tool_name == "query_odoo_group":
-                        try:
-                            model = arguments.get("model")
-                            groupby = arguments.get("groupby") or []
-                            for field in groupby:
-                                ids = []
-                                for row in (tool_result or []):
-                                    val = row.get(field)
-                                    if isinstance(val, (list, tuple)) and val:
-                                        ids.append(val[0])
-                                    elif isinstance(val, int):
-                                        ids.append(val)
-                                if ids:
-                                    state.last_ids_by_model_field[(model, field)] = set(ids)
-                        except Exception:
-                            pass
-
-                    if tool_name == "query_odoo_group":
-                        try:
-                            if arguments.get("model") == "sale.order" and "user_id" in (arguments.get("groupby") or []):
-                                rows = tool_result if isinstance(tool_result, list) else []
-                                if rows and rows[0].get("user_id") is False:
-                                    domain = arguments.get("domain") or []
-                                    domain = [d for d in domain if not (isinstance(d, (list, tuple)) and len(d) == 3 and d[0] == "user_id")]
-                                    domain.append(["user_id", "!=", False])
-                                    retry_args = dict(arguments)
-                                    retry_args["domain"] = domain
-                                    tool_result = execute_tool(tool_name, retry_args)
-                                    update_quality_metrics_from_tool_result(metrics, tool_name, retry_args, tool_result)
-                                    logger.info("Resultado '%s' retry user_id!=False: %s", tool_name, str(tool_result)[:300])
-                        except Exception:
-                            pass
-
-                    entity = _extract_entity_from_tool_result(arguments.get("model"), tool_result, tool_name, arguments)
-                    if entity:
-                        if metrics.get("entity_consistent") is not False:
-                            metrics["entity_consistent"] = True
-                        response_memory = update_last_entity(response_memory, entity, question)
-
-                except json.JSONDecodeError as e:
-                    logger.error(f"JSON decode error en tool_call: {e}")
-                    tool_result = "Error: argumentos inválidos en tool_call (JSON malformado)."
-                except ValueError as e:
-                    tool_result = f"Error de validación: {str(e)}"
-                except Exception as e:
-                    logger.exception("Tool call failed")
-                    tool_result = f"Error ejecutando la herramienta {tool_name}: {str(e)}"
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": compress_tool_result(tool_name, tool_result),
-            })
-
-    return _finalize(
-        "No pude completar la consulta tras varios intentos. Intenta reformular la pregunta.",
-        success=False,
-        error_type="max_iterations",
+    return run_tool_guided_loop(
+        question=question,
+        messages=messages,
+        max_iterations=max_iterations,
+        metrics=metrics,
+        intent_plan=intent_plan,
+        catalog_intent=catalog_intent,
+        query_has_explicit_entity_hint=query_has_explicit_entity_hint,
+        finalize=lambda answer, success, error_type=None: _finalize(answer, success=success, error_type=error_type),
+        callbacks=callbacks,
     )

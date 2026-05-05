@@ -1,0 +1,71 @@
+{
+  "explicit_doc_regex": "\\b(?:PO|SO|DCN|DCE|FC|FAC|INV|P)\\s*[-/]?[A-Z0-9-]*\\d[A-Z0-9-]*\\b",
+  "entity_hint_tokens": [
+    "orden ",
+    "orden de compra",
+    "orden de venta",
+    "compra ",
+    "venta ",
+    "factura ",
+    "pedido "
+  ],
+  "guardrail_terms": {
+    "sales_terms": ["venta", "ventas", "pedido", "pedidos", "orden de venta", "ordenes de venta"],
+    "purchase_terms": ["compra", "compras", "proveedor", "proveedores", "orden de compra", "ordenes de compra"],
+    "invoice_terms": ["factura", "facturas", "comprobante", "comprobantes", "emitida", "emitidas"],
+    "pending_terms": ["pendiente", "pendientes"],
+    "orders_with_invoice_terms": [
+      "con factura",
+      "con facturas",
+      "que tengan factura",
+      "que tengan facturas",
+      "tiene factura",
+      "tiene facturas",
+      "tienen factura",
+      "tienen facturas",
+      "tenga factura",
+      "tenga facturas",
+      "con comprobante",
+      "con comprobantes",
+      "tengan factura",
+      "tengan facturas"
+    ]
+  },
+  "invoice_scope_patterns": [
+    "esta venta",
+    "esa venta",
+    "este pedido",
+    "ese pedido",
+    "esta compra",
+    "esa compra",
+    "de esta venta",
+    "de esa venta",
+    "de esta compra",
+    "de esa compra",
+    "tiene factura",
+    "tiene alguna factura",
+    "su factura",
+    "sus facturas",
+    "facturas relacionadas"
+  ],
+  "clarification": {
+    "followup_confidence_threshold": 0.75,
+    "followup_confidence": {
+      "base": 0.65,
+      "source_weights": {
+        "last_explicit_entity": 0.95,
+        "primary_entity": 0.85,
+        "last_ui_entity": 0.6
+      },
+      "reference_bonus": 0.05,
+      "conflict_penalty": 0.35
+    }
+  },
+  "clarification_messages": {
+    "products": "¿De qué venta o compra quieres ver los productos? Indícame la orden.",
+    "invoices": "¿De qué venta o compra quieres ver las facturas? Indícame la orden.",
+    "related_sales": "¿De qué compra quieres ver la venta relacionada? Indícame la orden de compra.",
+    "ambiguous_invoices": "¿Te refieres a la factura de la {first_label} {first_name} o de la {second_label} {second_name}?",
+    "ambiguous_default": "¿Te refieres a la {first_label} {first_name} o a la {second_label} {second_name}?"
+  }
+}

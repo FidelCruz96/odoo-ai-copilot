@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 import unicodedata
 
 from .defaults import detect_period_range
@@ -13,14 +13,20 @@ MODEL_BUSINESS_OBJECT = {
     "purchase.order": "purchase_order",
     "purchase.order.line": "purchase_order_line",
     "account.move": "invoice",
-    "account.move.line": "invoice_line",
     "res.partner": "partner",
     "product.product": "product",
-    "stock.picking": "stock_picking",
+    "stock.picking": "picking",
 }
 
 COUNT_TERMS = ("cuantos", "cuántos", "cuantas", "cuántas", "cantidad", "numero", "número", "total", "conteo")
 LIST_TERMS = ("muestra", "muestrame", "muéstrame", "lista", "listar", "detalle", "ver", "dame")
+RANGE_OPERATORS = {">", ">=", "<", "<=", "="}
+DATETIME_RANGE_FIELDS = {
+    ("sale.order", "date_order"),
+    ("purchase.order", "date_order"),
+    ("purchase.order", "date_approve"),
+    ("stock.picking", "scheduled_date"),
+}
 
 INTENT_VARIANTS = {
     "count_facturas_pendientes": {"list": "list_facturas_pendientes"},
@@ -42,6 +48,44 @@ def _contains_any(text: str, terms: tuple[str, ...] | list[str]) -> bool:
 def _append_domain(domain: list, clause: list):
     if clause not in domain:
         domain.append(clause)
+
+
+def _has_domain_clause(domain: list, field_name: str) -> bool:
+    for clause in domain or []:
+        if isinstance(clause, (list, tuple)) and len(clause) == 3 and clause[0] == field_name:
+            return True
+    return False
+
+
+def _strip_domain_range(domain: list, field_name: str) -> list:
+    output = []
+    for clause in domain or []:
+        if isinstance(clause, (list, tuple)) and len(clause) == 3:
+            field, operator, _value = clause
+            if field == field_name and operator in RANGE_OPERATORS:
+                continue
+        output.append(clause)
+    return output
+
+
+def _append_time_range(domain: list, model: str, field_name: str, start: str | None, end: str | None) -> list:
+    normalized = _strip_domain_range(domain, field_name)
+    if (model, field_name) in DATETIME_RANGE_FIELDS:
+        if start:
+            _append_domain(normalized, [field_name, ">=", f"{start} 00:00:00"])
+        if end:
+            try:
+                next_day = str(date.fromisoformat(str(end)) + timedelta(days=1))
+            except Exception:
+                next_day = str(end)
+            _append_domain(normalized, [field_name, "<", f"{next_day} 00:00:00"])
+        return normalized
+
+    if start:
+        _append_domain(normalized, [field_name, ">=", start])
+    if end:
+        _append_domain(normalized, [field_name, "<=", end])
+    return normalized
 
 
 def infer_action(question: str, intent_name: str | None = None) -> str | None:
@@ -76,6 +120,8 @@ def _infer_model_from_question(question: str) -> str | None:
     q = _normalize_text(question)
     if "factura" in q or "comprobante" in q:
         return "account.move"
+    if "picking" in q or "pickings" in q or "recepcion" in q or "recepción" in q:
+        return "stock.picking"
     if "compra" in q or "proveedor" in q:
         return "purchase.order"
     if "venta" in q or "pedido" in q:
@@ -166,20 +212,17 @@ def apply_frame_to_plan(plan: dict | None, frame: dict | None) -> dict | None:
         start = time_range.get("from")
         end = time_range.get("to")
         if model == "sale.order":
-            if start:
-                _append_domain(domain, ["date_order", ">=", start])
-            if end:
-                _append_domain(domain, ["date_order", "<=", end])
+            domain = _append_time_range(domain, model, "date_order", start, end)
         elif model == "purchase.order":
-            if start:
-                _append_domain(domain, ["date_order", ">=", start])
-            if end:
-                _append_domain(domain, ["date_order", "<=", end])
+            # Si el intent ya usa date_approve, respetamos ese campo y evitamos mezclar con date_order.
+            if _has_domain_clause(domain, "date_approve"):
+                domain = _append_time_range(domain, model, "date_approve", start, end)
+            else:
+                domain = _append_time_range(domain, model, "date_order", start, end)
         elif model == "account.move":
-            if start:
-                _append_domain(domain, ["invoice_date", ">=", start])
-            if end:
-                _append_domain(domain, ["invoice_date", "<=", end])
+            domain = _append_time_range(domain, model, "invoice_date", start, end)
+        elif model == "stock.picking":
+            domain = _append_time_range(domain, model, "scheduled_date", start, end)
 
     arguments["domain"] = domain
 

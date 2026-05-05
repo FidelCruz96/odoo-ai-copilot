@@ -6,6 +6,15 @@ import unicodedata
 from .intent_catalog import INTENT_CATALOG
 
 INTENT_PRIORITY = [
+    "top_clientes_ventas_mes",
+    "clientes_facturas_vencidas_ranking",
+    "ordenes_compra_pendientes_recepcion",
+    "pickings_pendientes_validar_hoy",
+    "resumen_operativo_hoy",
+    "ordenes_venta_pendientes_facturar",
+    "count_pickings_por_estado",
+    "list_ultimas_ventas_con_factura",
+    "list_ultimas_compras_con_factura",
     "facturas_vencidas_count",
     "list_facturas_pendientes",
     "count_facturas_pendientes",
@@ -40,6 +49,69 @@ def contains_any(text: str, options: list[str]) -> bool:
 
 def detect_intent_by_keywords(question: str) -> str | None:
     q = normalize_text(question)
+
+    if (
+        contains_any(q, ["picking", "pickings"])
+        and contains_any(q, ["cuantos", "cuántos", "cantidad", "conteo", "total"])
+        and contains_any(q, ["espera", "en espera", "waiting"])
+        and contains_any(q, ["disponible", "disponibles", "asignado", "asignados"])
+        and contains_any(q, ["hecho", "hechos", "done", "completado", "completados"])
+    ):
+        return "count_pickings_por_estado"
+
+    if "resumen operativo" in q and ("hoy" in q or "dia" in q or "día" in q):
+        return "resumen_operativo_hoy"
+
+    if (
+        contains_any(q, ["pickings", "picking"])
+        and contains_any(q, ["pendiente", "pendientes", "por validar"])
+        and contains_any(q, ["validar", "validacion", "validación"])
+        and "hoy" in q
+    ):
+        return "pickings_pendientes_validar_hoy"
+
+    if (
+        contains_any(q, ["orden de compra", "ordenes de compra", "órdenes de compra", "compra", "compras"])
+        and contains_any(q, ["pendiente", "pendientes", "recepcion", "recepción", "por recibir"])
+    ):
+        return "ordenes_compra_pendientes_recepcion"
+
+    if (
+        contains_any(q, ["pedido de venta", "pedidos de venta", "orden de venta", "ordenes de venta", "órdenes de venta", "venta", "ventas"])
+        and contains_any(q, ["pendiente", "pendientes"])
+        and contains_any(q, ["facturar", "por facturar"])
+    ):
+        return "ordenes_venta_pendientes_facturar"
+
+    if (
+        "cliente" in q
+        and "factura" in q
+        and contains_any(q, ["vencida", "vencidas", "atrasada", "atrasadas"])
+        and contains_any(q, ["mas", "más", "top"])
+    ):
+        return "clientes_facturas_vencidas_ranking"
+
+    if (
+        "cliente" in q
+        and contains_any(q, ["venta", "ventas"])
+        and contains_any(q, ["mas", "más", "top"])
+        and contains_any(q, ["mes", "este mes", "mes actual"])
+    ):
+        return "top_clientes_ventas_mes"
+
+    if (
+        contains_any(q, ["ultimo", "ultimos", "ultima", "ultimas", "reciente", "recientes"])
+        and contains_any(q, ["venta", "ventas", "pedido", "pedidos", "orden de venta", "ordenes de venta"])
+        and contains_any(q, ["factura", "facturas", "comprobante", "comprobantes"])
+    ):
+        return "list_ultimas_ventas_con_factura"
+
+    if (
+        contains_any(q, ["ultimo", "ultimos", "ultima", "ultimas", "reciente", "recientes"])
+        and contains_any(q, ["compra", "compras", "proveedor", "proveedores", "orden de compra", "ordenes de compra"])
+        and contains_any(q, ["factura", "facturas", "comprobante", "comprobantes"])
+    ):
+        return "list_ultimas_compras_con_factura"
 
     if (
         "factura" in q
@@ -182,7 +254,7 @@ def detect_intent_family(question: str) -> str:
     fact_keywords = ["factura", "facturas", "vencida", "vencidas", "cobro", "cobros", "pago", "pagadas", "pendientes"]
     cliente_keywords = ["cliente", "clientes", "partner", "partners"]
     producto_keywords = ["producto", "productos", "artículo", "articulos", "ítem", "items"]
-    inventario_keywords = ["stock", "inventario", "existencias", "almacen", "almacén"]
+    inventario_keywords = ["stock", "inventario", "existencias", "almacen", "almacén", "picking", "pickings", "recepcion", "recepción"]
 
     if any(k in q for k in fact_keywords):
         return "facturacion"
