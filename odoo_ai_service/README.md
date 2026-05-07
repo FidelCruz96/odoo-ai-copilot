@@ -1,4 +1,8 @@
-# Odoo AI Copilot
+# Odoo Ops Copilot
+
+Hybrid AI agent for Odoo ERP operations that combines deterministic ORM tools with RAG over functional and technical documentation.
+
+It can answer questions about real ERP data, explain business processes, validate operational rules, and provide grounded responses with both Odoo evidence and cited knowledge sources.
 
 Asistente conversacional híbrido para Odoo que permite consultar datos reales del ERP usando lenguaje natural.
 

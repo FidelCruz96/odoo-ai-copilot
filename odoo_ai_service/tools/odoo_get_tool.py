@@ -2,13 +2,61 @@ import os
 import logging
 import requests
 import re
+
 odoo_base_url = os.getenv("ODOO_BASE_URL") or os.getenv("ODOO_URL") or "http://web:8069"
 odoo_db = os.getenv("ODOO_DB")
 odoo_ai_token = os.getenv("ODOO_AI_TOKEN")
 ODOO_API = f"{odoo_base_url}/ai/get_data"
 ODOO_SCHEMA_API = f"{odoo_base_url}/ai/schema"
+MAX_QUERY_LIMIT = int(os.getenv("ODOO_AI_MAX_QUERY_LIMIT", "100"))
+
+ALLOWED_MODELS = {
+    "sale.order",
+    "sale.order.line",
+    "account.move",
+    "account.move.line",
+    "purchase.order",
+    "purchase.order.line",
+    "res.partner",
+    "product.product",
+    "stock.picking",
+}
+
+BLOCKED_FIELDS = {
+    "password",
+    "token",
+    "api_key",
+    "access_token",
+    "secret",
+}
 
 logger = logging.getLogger("odoo_ai_service")
+
+
+def _normalize_field_name(field_expr):
+    if not isinstance(field_expr, str):
+        return None
+    raw_field = field_expr.strip()
+    if not raw_field:
+        return None
+    base_field, _agg = _parse_agg_field(raw_field)
+    if base_field:
+        return base_field
+    return raw_field
+
+
+def _is_allowed_model(model):
+    return isinstance(model, str) and model in ALLOWED_MODELS
+
+
+def _has_blocked_field(entries):
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        field_name = _normalize_field_name(entry)
+        if field_name and field_name.lower() in BLOCKED_FIELDS:
+            return True
+    return False
 
 def _parse_agg_field(field_expr: str):
     """
@@ -45,9 +93,21 @@ def _has_valid_aggregate_field(fields):
 def _validate_query_payload(operation, model, domain=None, fields=None, ids=None, groupby=None, orderby=None, limit=None):
     if not model or not isinstance(model, str):
         return "model_required"
+    if not _is_allowed_model(model):
+        return "model_not_allowed"
 
     if domain is not None and not isinstance(domain, list):
         return "invalid_domain_type"
+    if fields is not None and not isinstance(fields, list):
+        return "invalid_fields_type"
+    if groupby is not None and not isinstance(groupby, list):
+        return "invalid_groupby_type"
+    if _has_blocked_field(fields):
+        return "blocked_field_requested"
+    if _has_blocked_field(groupby):
+        return "blocked_field_requested"
+    if limit is not None and (not isinstance(limit, int) or limit < 1 or limit > MAX_QUERY_LIMIT):
+        return "invalid_limit"
 
     if operation == "read":
         if not ids or not isinstance(ids, list):
@@ -62,22 +122,12 @@ def _validate_query_payload(operation, model, domain=None, fields=None, ids=None
         if groupby is None:
             groupby = []
 
-        if not isinstance(groupby, list):
-            return "invalid_groupby_type"
-
         has_groupby = len(groupby) > 0
         has_aggregate = _has_valid_aggregate_field(fields)
 
         # read_group debe tener al menos groupby o agregación válida
         if not has_groupby and not has_aggregate:
             return "group_requires_groupby_or_aggregate"
-
-        if limit is not None and (not isinstance(limit, int) or limit < 1 or limit > 100):
-            return "invalid_limit"
-
-    if operation == "search":
-        if limit is not None and (not isinstance(limit, int) or limit < 1 or limit > 100):
-            return "invalid_limit"
 
     return None
 
@@ -99,7 +149,14 @@ def query_odoo(model, operation="search_read", domain=None, fields=None, ids=Non
         payload["orderby"] = orderby
     if limit is not None:
         payload["limit"] = limit
-    logger.info("QUERYING ODOO payload=%s", payload)
+    logger.info(
+        "QUERYING ODOO model=%s operation=%s fields=%s groupby=%s limit=%s",
+        model,
+        operation,
+        fields or [],
+        groupby or [],
+        limit,
+    )
     rpc_payload = {
         "jsonrpc": "2.0",
         "method": "call",
@@ -153,6 +210,8 @@ def get_schema(models, force=False):
     """
     if not models or not isinstance(models, list):
         return {"error": "models_required"}
+    if not all(_is_allowed_model(model) for model in models):
+        return {"error": "model_not_allowed"}
 
     payload = {
         "jsonrpc": "2.0",

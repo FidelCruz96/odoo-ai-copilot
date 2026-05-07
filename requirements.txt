@@ -1,0 +1,5 @@
+pydevd-odoo
+openpyxl == 3.0.9
+python-docx
+docxcompose
+jwt

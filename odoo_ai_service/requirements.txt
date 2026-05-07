@@ -4,3 +4,4 @@ openai
 langchain
 psycopg2-binary
 pgvector
+python-multipart
