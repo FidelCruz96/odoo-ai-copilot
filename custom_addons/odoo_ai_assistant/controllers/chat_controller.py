@@ -1,6 +1,7 @@
 import os
 import re
 import hmac
+import hashlib
 import logging
 import json
 import uuid
@@ -8,6 +9,7 @@ from datetime import date, timedelta
 import requests
 from requests.exceptions import RequestException
 from odoo import http
+from odoo.exceptions import AccessError
 from odoo.http import request
 
 _logger = logging.getLogger(__name__)
@@ -337,6 +339,108 @@ def _clamp_limit(limit, default=None):
     return limit
 
 
+def _extract_access_context(params):
+    if not isinstance(params, dict):
+        return {}
+    access_context = params.get("access_context") or params.get("security") or {}
+    if isinstance(access_context, dict):
+        return access_context
+    return {}
+
+
+def _resolve_ai_user_scope(params):
+    access_context = _extract_access_context(params)
+    uid = access_context.get("uid") or access_context.get("user_id")
+    if isinstance(uid, str) and uid.isdigit():
+        uid = int(uid)
+    if not isinstance(uid, int):
+        raise PermissionError("user_context_required")
+
+    user = request.env["res.users"].sudo().browse(uid).exists()
+    if not user or not user.active:
+        raise PermissionError("user_context_invalid")
+
+    user_company_ids = set(user.company_ids.ids)
+    requested_company_ids = access_context.get("allowed_company_ids") or access_context.get("company_ids")
+    if requested_company_ids is None:
+        requested_company_ids = [access_context.get("active_company_id") or access_context.get("company_id") or user.company_id.id]
+    if not isinstance(requested_company_ids, list):
+        requested_company_ids = [requested_company_ids]
+
+    clean_company_ids = []
+    for value in requested_company_ids:
+        if isinstance(value, str) and value.isdigit():
+            value = int(value)
+        if isinstance(value, int):
+            clean_company_ids.append(value)
+
+    if not clean_company_ids:
+        clean_company_ids = [user.company_id.id]
+
+    requested_set = set(clean_company_ids)
+    if not requested_set.issubset(user_company_ids):
+        raise PermissionError("company_scope_not_allowed")
+
+    active_company_id = access_context.get("active_company_id") or access_context.get("company_id") or clean_company_ids[0]
+    if isinstance(active_company_id, str) and active_company_id.isdigit():
+        active_company_id = int(active_company_id)
+    if active_company_id not in requested_set:
+        raise PermissionError("active_company_not_allowed")
+
+    scoped_context = {
+        "allowed_company_ids": clean_company_ids,
+        "company_id": active_company_id,
+    }
+    if access_context.get("lang"):
+        scoped_context["lang"] = access_context.get("lang")
+    if access_context.get("tz"):
+        scoped_context["tz"] = access_context.get("tz")
+
+    return user, scoped_context, {
+        "uid": user.id,
+        "company_ids": clean_company_ids,
+        "active_company_id": active_company_id,
+        "groups_hash": access_context.get("groups_hash"),
+        "request_id": access_context.get("request_id") or params.get("request_id"),
+    }
+
+
+def _scoped_model(model_name, params):
+    user, scoped_context, audit_context = _resolve_ai_user_scope(params)
+    Model = request.env[model_name].with_user(user.id).with_context(**scoped_context)
+    Model.browse().check_access("read")
+    return Model, audit_context
+
+
+def _result_count(result):
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, int):
+        return result
+    if result is None:
+        return 0
+    return 1
+
+
+def _log_ai_tool_audit(status, audit_context, model, operation, domain=None, fields=None, result=None, error_code=None):
+    audit_context = audit_context or {}
+    payload = {
+        "status": status,
+        "request_id": audit_context.get("request_id"),
+        "uid": audit_context.get("uid"),
+        "company_ids": audit_context.get("company_ids"),
+        "active_company_id": audit_context.get("active_company_id"),
+        "groups_hash": audit_context.get("groups_hash"),
+        "model": model,
+        "operation": operation,
+        "domain": domain or [],
+        "fields": fields or [],
+        "record_count": _result_count(result),
+        "error_code": error_code,
+    }
+    _logger.info("AI_TOOL_AUDIT %s", json.dumps(payload, ensure_ascii=False))
+
+
 def _require_service_token():
     if not AI_REQUIRE_SERVICE_TOKEN:
         return None
@@ -363,6 +467,43 @@ def _ai_service_headers():
     if not AI_SERVICE_TOKEN:
         return {}
     return {"X-AI-Service-Token": AI_SERVICE_TOKEN}
+
+
+def _hash_groups(group_xmlids):
+    raw = ",".join(sorted(str(item) for item in (group_xmlids or []) if item))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest() if raw else None
+
+
+def _group_xmlids_for_user(user):
+    group_xmlids = []
+    try:
+        external_ids = user.groups_id.get_external_id()
+    except Exception:
+        external_ids = {}
+    for group in user.groups_id:
+        xmlid = external_ids.get(group.id)
+        if xmlid:
+            group_xmlids.append(xmlid)
+    return sorted(group_xmlids)
+
+
+def _access_context_for_user(user, company, ctx):
+    ctx = ctx or {}
+    allowed_company_ids = list(user.company_ids.ids)
+    active_company_id = company.id if company else user.company_id.id
+    group_xmlids = _group_xmlids_for_user(user)
+    return {
+        "uid": user.id,
+        "user_id": user.id,
+        "company_id": active_company_id,
+        "active_company_id": active_company_id,
+        "company_ids": allowed_company_ids,
+        "allowed_company_ids": allowed_company_ids,
+        "groups": group_xmlids,
+        "groups_hash": _hash_groups(group_xmlids),
+        "lang": ctx.get("lang"),
+        "tz": ctx.get("tz"),
+    }
 
 
 def _get_session_key(client_context):
@@ -636,6 +777,7 @@ class AIChatController(http.Controller):
         user = request.env.user
         company = request.env.company
         ctx = request.context or {}
+        access_context = _access_context_for_user(user, company, ctx)
         session_key = _get_session_key(context or {})
         memory = _get_session_memory(user.id, session_key)
         history = []
@@ -660,6 +802,8 @@ class AIChatController(http.Controller):
             "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
+                "security": access_context,
+                "access_context": access_context,
                 "company": {
                     "id": company.id,
                     "name": company.name,
@@ -747,6 +891,7 @@ class AIChatController(http.Controller):
         user = request.env.user
         company = request.env.company
         ctx = request.context or {}
+        access_context = _access_context_for_user(user, company, ctx)
         session_key = _get_session_key(client_context)
         memory = _get_session_memory(user.id, session_key)
         history = []
@@ -770,6 +915,8 @@ class AIChatController(http.Controller):
             "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
+                "security": access_context,
+                "access_context": access_context,
                 "company": {
                     "id": company.id,
                     "name": company.name,
@@ -895,6 +1042,7 @@ class AIController(http.Controller):
         ids = params.get("ids") or []
         groupby = params.get("groupby") or []
         orderby = params.get("orderby")
+        audit_context = None
 
         try:
             model = _validate_model_name(model)
@@ -912,7 +1060,7 @@ class AIController(http.Controller):
             else:
                 limit = None
 
-            Model = request.env[model].sudo()
+            Model, audit_context = _scoped_model(model, params)
 
             if operation == "search_read":
                 result = Model.search_read(domain, fields, limit=limit)
@@ -925,7 +1073,9 @@ class AIController(http.Controller):
                     return _error_response("ERR_INVALID_QUERY", "La operación 'read' requiere IDs.")
                 if not fields:
                     return _error_response("ERR_INVALID_QUERY", "La operación 'read' requiere campos.")
-                result = Model.browse(ids).read(fields)
+                records = Model.browse(ids).exists()
+                records.check_access("read")
+                result = records.read(fields)
             elif operation == "read_group":
                 if not fields:
                     return _error_response("ERR_INVALID_QUERY", "La operación 'read_group' requiere campos.")
@@ -933,15 +1083,19 @@ class AIController(http.Controller):
             else:
                 return _error_response("ERR_OPERATION_NOT_ALLOWED", "Operación no permitida.", status=403)
 
+            _log_ai_tool_audit("ok", audit_context, model, operation, domain=domain, fields=fields, result=result)
             return request.make_json_response(result)
-        except PermissionError as e:
+        except (PermissionError, AccessError) as e:
             _logger.warning("AI query blocked: %s", e)
+            _log_ai_tool_audit("blocked", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e))
             return _error_response("ERR_PERMISSION_DENIED", "Consulta bloqueada por política de seguridad.", status=403, details=e)
         except ValueError as e:
             _logger.warning("AI query validation error: %s", e)
+            _log_ai_tool_audit("invalid", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e))
             return _error_response("ERR_INVALID_QUERY", "Parámetros de consulta inválidos.", status=400, details=e)
         except Exception as e:
             _logger.exception("AI query error")
+            _log_ai_tool_audit("error", audit_context, model, operation, domain=domain, fields=fields, error_code=type(e).__name__)
             return _error_response("ERR_QUERY_EXECUTION", "No se pudo ejecutar la consulta.", status=500, details=e)
 
     @http.route("/ai/schema", type="http", auth="public", csrf=False, methods=["GET", "POST"])
@@ -954,6 +1108,7 @@ class AIController(http.Controller):
         params = payload.get("params", payload) if isinstance(payload, dict) else {}
         force = bool(params.get("force")) if isinstance(params, dict) else False
         models_filter = params.get("models") if isinstance(params, dict) else None
+        audit_context = None
 
         if models_filter is None:
             models_filter = sorted(AI_ALLOWED_MODELS)
@@ -977,11 +1132,27 @@ class AIController(http.Controller):
             return _error_response("ERR_TOO_BROAD_QUERY", "Demasiados modelos solicitados.")
 
         try:
+            user, scoped_context, audit_context = _resolve_ai_user_scope(params)
+            accessible_models = []
+            for model_name in clean_models:
+                Model = request.env[model_name].with_user(user.id).with_context(**scoped_context)
+                if Model.browse().has_access("read"):
+                    accessible_models.append(model_name)
+
+            if not accessible_models:
+                raise PermissionError("no_accessible_models")
+
             schema = request.env["ai.schema.cache"].sudo().get_schema(
                 force=force,
-                models_filter=clean_models,
+                models_filter=accessible_models,
             )
+            _log_ai_tool_audit("ok", audit_context, "schema", "schema", fields=accessible_models, result=schema)
             return request.make_json_response(_sanitize_schema_payload(schema))
+        except (PermissionError, AccessError) as e:
+            _logger.warning("AI schema blocked: %s", e)
+            _log_ai_tool_audit("blocked", audit_context, "schema", "schema", fields=clean_models, error_code=str(e))
+            return _error_response("ERR_PERMISSION_DENIED", "Consulta bloqueada por política de seguridad.", status=403, details=e)
         except Exception as e:
             _logger.exception("AI schema error")
+            _log_ai_tool_audit("error", audit_context, "schema", "schema", fields=clean_models, error_code=type(e).__name__)
             return _error_response("ERR_SCHEMA_EXECUTION", "No se pudo obtener schema.", status=500, details=e)

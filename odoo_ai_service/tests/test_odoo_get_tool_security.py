@@ -51,6 +51,35 @@ class TestOdooGetToolSecurity(unittest.TestCase):
         post.assert_not_called()
         self.assertEqual(result["error"], "model_not_allowed")
 
+    def test_query_odoo_requires_access_context_before_http(self):
+        with patch.dict("tools.odoo_get_tool.os.environ", {"ODOO_AI_REQUIRE_ACCESS_CONTEXT": "true"}):
+            with patch("tools.odoo_get_tool.requests.post") as post:
+                result = query_odoo(model="sale.order", operation="search", limit=10)
+
+        post.assert_not_called()
+        self.assertEqual(result["error"], "access_context_required")
+
+    def test_query_odoo_sends_access_context(self):
+        class Response:
+            ok = True
+            text = "[]"
+
+            def json(self):
+                return []
+
+        with patch("tools.odoo_get_tool.requests.post", return_value=Response()) as post:
+            result = query_odoo(
+                model="sale.order",
+                operation="search",
+                limit=10,
+                context={"request_id": "req-1", "security": {"uid": 2, "company_ids": [1]}},
+            )
+
+        self.assertEqual(result, [])
+        payload = post.call_args.kwargs["json"]["params"]
+        self.assertEqual(payload["access_context"]["uid"], 2)
+        self.assertEqual(payload["access_context"]["request_id"], "req-1")
+
 
 if __name__ == "__main__":
     unittest.main()

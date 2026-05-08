@@ -11,6 +11,7 @@ TOOL_REGISTRY = {
     "query_odoo_group": query_odoo_group,
     "search_knowledge": run_search_knowledge,
 }
+ODOO_TOOL_PREFIX = "query_odoo_"
 
 MODEL_ENTITY_LABELS = {
     "sale.order": "la venta",
@@ -48,7 +49,14 @@ def _resolve_dynamic_args(arguments: dict, previous_result):
     return resolved
 
 
-def execute_plan(plan: list[dict], entity: dict | None = None) -> dict:
+def _attach_runtime_context(tool_name: str | None, arguments: dict, context: dict | None) -> dict:
+    resolved = dict(arguments or {})
+    if tool_name and tool_name.startswith(ODOO_TOOL_PREFIX) and isinstance(context, dict):
+        resolved.setdefault("context", context)
+    return resolved
+
+
+def execute_plan(plan: list[dict], entity: dict | None = None, context: dict | None = None) -> dict:
     tools_used: list[str] = []
     results: list[dict] = []
     previous_result = None
@@ -57,6 +65,7 @@ def execute_plan(plan: list[dict], entity: dict | None = None) -> dict:
     for step in plan:
         tool_name = step.get("tool")
         arguments = _resolve_dynamic_args(step.get("args") or {}, previous_result)
+        arguments = _attach_runtime_context(tool_name, arguments, context)
         if tool_name == "query_odoo_read" and not arguments.get("ids"):
             return {
                 "success": False,

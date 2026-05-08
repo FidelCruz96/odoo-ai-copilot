@@ -82,6 +82,25 @@ class TestAppToolExecutorMessages(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertEqual(result["message"], "No encontré la factura INV001.")
 
+    def test_odoo_tool_receives_runtime_context(self):
+        plan = [{"tool": "query_odoo_count", "args": {"model": "sale.order", "domain": []}}]
+        registry = dict(tool_executor.TOOL_REGISTRY)
+        captured = {}
+
+        def fake_count(**kwargs):
+            captured.update(kwargs)
+            return 7
+
+        registry["query_odoo_count"] = fake_count
+        context = {"request_id": "req-iam", "security": {"uid": 9, "company_ids": [1]}}
+
+        with patch.object(tool_executor, "TOOL_REGISTRY", registry):
+            result = tool_executor.execute_plan(plan, context=context)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["results"][0]["result"], 7)
+        self.assertEqual(captured["context"], context)
+
 
 if __name__ == "__main__":
     unittest.main()

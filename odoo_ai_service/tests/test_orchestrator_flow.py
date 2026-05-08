@@ -112,6 +112,31 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(result["route_selected"], "clarification")
         self.assertTrue(result["needs_clarification"])
 
+    def test_line_items_without_active_entity_asks_for_clarification(self):
+        result = ask_hybrid_agent("que productos se vendieron", session_id="flow-lines", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertEqual(result["intent_detected"], "line_items")
+        self.assertTrue(result["needs_clarification"])
+        self.assertIn("venta", result["answer"].lower())
+        self.assertEqual(result["tools_used"], [])
+
+    def test_amount_without_active_entity_asks_for_clarification(self):
+        result = ask_hybrid_agent("cuanto es el total", session_id="flow-amount-missing", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertEqual(result["intent_detected"], "amount_lookup")
+        self.assertTrue(result["needs_clarification"])
+        self.assertIn("contexto", result["answer"].lower())
+
+    def test_status_without_active_entity_asks_for_clarification(self):
+        result = ask_hybrid_agent("cual es su estado", session_id="flow-status-missing", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertEqual(result["intent_detected"], "status_lookup")
+        self.assertTrue(result["needs_clarification"])
+        self.assertIn("contexto", result["answer"].lower())
+
     def test_documentation_pure(self):
         with patch("app.agents.orchestrator.execute_plan", return_value={
             "success": True,
@@ -144,6 +169,7 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(result["grounded"])
         self.assertIn("24 ventas", result["answer"])
         self.assertEqual(execute_plan.call_args.args[0][0]["tool"], "query_odoo_count")
+        self.assertEqual(execute_plan.call_args.kwargs["context"]["request_id"], result["trace_id"])
 
     def test_invoice_ranking_uses_odoo_group_tool(self):
         with patch("app.agents.orchestrator.execute_plan", return_value={

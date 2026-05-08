@@ -17,6 +17,9 @@ def select_route(
     if has_relative_reference_without_context:
         return CLARIFICATION
 
+    if intent in {"amount_lookup", "status_lookup", "line_items"} and not entity:
+        return CLARIFICATION
+
     if intent in ["amount_lookup", "status_lookup", "count", "ranking", "line_items"]:
         return ERP_DATA
 

@@ -45,6 +45,10 @@ jobs:
         working-directory: odoo_ai_service
         run: python -m unittest discover -s tests -q
 
+      - name: Validate eval dataset
+        working-directory: odoo_ai_service
+        run: python evals/run_eval.py --dry-run
+
   compose-validation:
     name: Docker Compose validation
     runs-on: ubuntu-latest

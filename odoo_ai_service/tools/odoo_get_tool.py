@@ -33,6 +33,31 @@ BLOCKED_FIELDS = {
 logger = logging.getLogger("odoo_ai_service")
 
 
+def _build_access_context(context):
+    if not isinstance(context, dict):
+        return {}
+
+    access_context = context.get("access_context") or context.get("security")
+    if not isinstance(access_context, dict):
+        user = context.get("user") if isinstance(context.get("user"), dict) else {}
+        company = context.get("company") if isinstance(context.get("company"), dict) else {}
+        access_context = {
+            "uid": user.get("id") or user.get("uid"),
+            "user_id": user.get("id") or user.get("uid"),
+            "company_id": company.get("id"),
+            "active_company_id": company.get("id"),
+            "company_ids": company.get("company_ids") or company.get("allowed_company_ids"),
+            "allowed_company_ids": company.get("company_ids") or company.get("allowed_company_ids"),
+            "lang": context.get("lang"),
+            "tz": context.get("tz"),
+        }
+
+    clean = dict(access_context)
+    if context.get("request_id") and not clean.get("request_id"):
+        clean["request_id"] = context.get("request_id")
+    return clean
+
+
 def _normalize_field_name(field_expr):
     if not isinstance(field_expr, str):
         return None
@@ -131,7 +156,7 @@ def _validate_query_payload(operation, model, domain=None, fields=None, ids=None
 
     return None
 
-def query_odoo(model, operation="search_read", domain=None, fields=None, ids=None, groupby=None, orderby=None, limit=None):
+def query_odoo(model, operation="search_read", domain=None, fields=None, ids=None, groupby=None, orderby=None, limit=None, context=None):
     validation_error = _validate_query_payload(operation, model, domain, fields, ids, groupby, orderby, limit)
     if validation_error:
         return {"error": validation_error}
@@ -149,13 +174,19 @@ def query_odoo(model, operation="search_read", domain=None, fields=None, ids=Non
         payload["orderby"] = orderby
     if limit is not None:
         payload["limit"] = limit
+    access_context = _build_access_context(context)
+    if access_context:
+        payload["access_context"] = access_context
+    elif os.getenv("ODOO_AI_REQUIRE_ACCESS_CONTEXT", "true").strip().lower() in {"1", "true", "yes", "y", "on"}:
+        return {"error": "access_context_required"}
     logger.info(
-        "QUERYING ODOO model=%s operation=%s fields=%s groupby=%s limit=%s",
+        "QUERYING ODOO model=%s operation=%s fields=%s groupby=%s limit=%s uid=%s",
         model,
         operation,
         fields or [],
         groupby or [],
         limit,
+        access_context.get("uid") or access_context.get("user_id"),
     )
     rpc_payload = {
         "jsonrpc": "2.0",
@@ -192,7 +223,7 @@ def query_odoo(model, operation="search_read", domain=None, fields=None, ids=Non
     return result
 
 
-def get_schema(models, force=False):
+def get_schema(models, force=False, context=None):
     """
     Obtiene un schema resumido de Odoo solo para los modelos solicitados.
 
@@ -224,6 +255,11 @@ def get_schema(models, force=False):
 
     if force:
         payload["params"]["force"] = True
+    access_context = _build_access_context(context)
+    if access_context:
+        payload["params"]["access_context"] = access_context
+    elif os.getenv("ODOO_AI_REQUIRE_ACCESS_CONTEXT", "true").strip().lower() in {"1", "true", "yes", "y", "on"}:
+        return {"error": "access_context_required"}
 
     params = {"db": odoo_db} if odoo_db else None
     headers = {}

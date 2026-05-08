@@ -100,6 +100,18 @@ def _fallback_response(question: str, context: dict | None, history: list | None
     return ask_agent(question, context=context, history=history)
 
 
+def _clarification_message(intent: str | None, context_message: str | None = None) -> str:
+    if context_message:
+        return context_message
+    if intent == "line_items":
+        return "Necesito contexto: indícame una venta, factura u orden específica para revisar sus productos o líneas."
+    if intent == "amount_lookup":
+        return "Necesito contexto: indícame la venta, factura u orden específica para consultar el total."
+    if intent == "status_lookup":
+        return "Necesito contexto: indícame la venta, factura u orden específica para consultar su estado."
+    return "Necesito más contexto."
+
+
 def _memory_from_success(
     session_id: str,
     existing_memory: ConversationMemory | None,
@@ -194,7 +206,7 @@ def ask_hybrid_agent(
     )
 
     if route == CLARIFICATION:
-        answer = compose_clarification(context_resolution.get("clarification_message") or "Necesito más contexto.")
+        answer = compose_clarification(_clarification_message(intent, context_resolution.get("clarification_message")))
         latency_ms = round((perf_counter() - started_at) * 1000, 2)
         active_model = active_entity.get("model") if isinstance(active_entity, dict) else None
         active_id = active_entity.get("id") if isinstance(active_entity, dict) else None
@@ -321,7 +333,7 @@ def ask_hybrid_agent(
             "metrics": metrics,
         }
 
-    execution_result = execute_plan(plan, entity=plan_entity)
+    execution_result = execute_plan(plan, entity=plan_entity, context=base_context)
     tools_used = execution_result.get("tools_used") or []
     knowledge_result = _extract_knowledge_result(execution_result)
     primary_record = _extract_primary_record(execution_result)

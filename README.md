@@ -315,6 +315,9 @@ curl -s http://localhost:8001/v1/knowledge/query \
 - Modelos, campos, operaciones, límites y dominios se validan antes de consultar.
 - Campos sensibles como tokens, passwords y secretos están bloqueados.
 - Las rutas internas usan token compartido entre Odoo y AI Service.
+- Las consultas de negocio se ejecutan con el usuario real de Odoo mediante `uid`, compañías permitidas y contexto de sesión.
+- El token de servicio autentica al AI Service, pero la autorización final la aplican ACLs y record rules de Odoo.
+- Cada tool call registra auditoría estructurada con `request_id`, `uid`, compañías, modelo, operación, dominio, campos y cantidad de registros.
 
 ## Validación local
 
@@ -350,11 +353,11 @@ Medición local contra contenedores de prueba el 2026-05-08:
 | --- | --- | --- | --- | ---: | ---: |
 | Conteo ERP | `cuantas ventas hay` | `erp_data` | `query_odoo_count` | 33.64 ms | 0 |
 | Ranking ERP | `top clientes por facturacion` | `erp_data` | `query_odoo_group` | 22.33 ms | 0 |
-| Consulta sin entidad activa | `que productos se vendieron` | `fallback` | ninguna | 0.46 ms | 0 |
+| Consulta sin entidad activa | `que productos se vendieron` | `clarification` | ninguna | 0.14 ms | 0 |
 
 Resumen de la muestra:
 
-- Promedio de latencia: 18.81 ms.
+- Promedio de latencia: 18.70 ms.
 - Máxima latencia observada: 33.64 ms.
 - Tokens LLM usados en rutas ERP determinísticas validadas: 0.
 - Costo marginal de modelo en esas rutas determinísticas: 0, porque no llaman al LLM.
@@ -368,9 +371,44 @@ Casos actualmente soportados con ruta determinística:
 - Agregaciones con `read_group`.
 - Follow-ups cuando existe entidad activa en memoria.
 
-Gap detectado en pruebas:
+Gap corregido en pruebas:
 
-- Preguntas de líneas como `que productos se vendieron` necesitan una venta/factura/orden activa. Sin entidad activa, todavía caen en `fallback`; debe convertirse en aclaración explícita.
+- Preguntas de líneas como `que productos se vendieron` necesitan una venta/factura/orden activa. Sin entidad activa ahora responden con `clarification` en vez de exponer un error técnico.
+
+## Evaluación
+
+El repo incluye una capa inicial de evaluación en `odoo_ai_service/evals`.
+
+Dataset principal:
+
+```text
+odoo_ai_service/evals/datasets/orchestrator_smoke.jsonl
+```
+
+Runner:
+
+```bash
+cd odoo_ai_service
+python evals/run_eval.py --dry-run
+python evals/run_eval.py \
+  --url http://localhost:8001/v1/ask \
+  --token change_me_for_local_dev \
+  --uid 2 \
+  --company-id 1 \
+  --report evals/reports/local.json
+```
+
+Qué valida:
+
+- Ruta esperada: `erp_data`, `knowledge`, `mixed`, `clarification` o `fallback`.
+- Intención detectada.
+- Tools esperadas.
+- Modelo Odoo usado.
+- `grounded` y `response_faithful`.
+- Latencia máxima por caso.
+- Texto mínimo esperado en la respuesta.
+
+El CI ejecuta `python evals/run_eval.py --dry-run` para validar formato del dataset. La corrida completa requiere Odoo + AI Service levantados y datos demo consistentes.
 
 ## CI/CD
 
@@ -380,6 +418,7 @@ El pipeline actual ejecuta:
 
 - Compilación Python de `odoo_ai_service` y `custom_addons/odoo_ai_assistant`.
 - Tests unitarios con `unittest`.
+- Validación seca del dataset de evals.
 - Validación de Docker Compose base.
 - Validación de Docker Compose con Knowledge/RAG.
 - Build Docker del AI Service.
