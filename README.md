@@ -410,6 +410,39 @@ Qué valida:
 
 El CI ejecuta `python evals/run_eval.py --dry-run` para validar formato del dataset. La corrida completa requiere Odoo + AI Service levantados y datos demo consistentes.
 
+Datos demo para evals:
+
+```text
+custom_addons/odoo_ai_eval_demo
+```
+
+Este módulo es solo para ambientes locales, demo o CI. Crea fixtures idempotentes para los casos del dataset:
+
+- `DCN 0426-0039` en `sale.order`.
+- `PO-I-10-00026` en `purchase.order`.
+- `INV/2026/00001` en `account.move`.
+
+Instalación local en la DB de prueba:
+
+```bash
+docker exec odoo18_web_test /opt/odoo/odoo/odoo-bin \
+  -d admin \
+  -i odoo_ai_eval_demo \
+  --stop-after-init \
+  --db_host db \
+  --db_port 5432 \
+  --db_user odoo \
+  --db_password odoo
+```
+
+Para correr el eval desde dentro del contenedor del AI Service:
+
+```bash
+docker exec ai_service_test python evals/run_eval.py \
+  --url http://127.0.0.1:8000/v1/ask \
+  --report evals/reports/latest-real.json
+```
+
 ## CI/CD
 
 El repo incluye GitHub Actions en `.github/workflows/ci.yml`.
