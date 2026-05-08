@@ -6,12 +6,19 @@
         <field name="arch" type="xml">
 
             <form string="AI Assistant" create="0" edit="0">
-                <sheet>
+                <sheet class="o_ai_chat_sheet">
                     <div class="o_ai_chat_window">
                         <div class="o_ai_chat_header">
-                            <span>Asistente IA</span>
-                            <span class="o_ai_chat_status" id="ai_chat_status"></span>
+                            <div class="o_ai_chat_header_main">
+                                <span>AI Assistant</span>
+                                <div class="o_ai_chat_header_meta">
+                                    <span class="o_ai_chat_status" id="ai_chat_status">● En línea</span>
+                                    <span class="o_ai_chat_latency" id="ai_chat_latency"></span>
+                                </div>
+                            </div>
+                            <div class="o_ai_chat_context" id="ai_chat_context">Contexto activo: Sin contexto activo</div>
                         </div>
+                        <div class="o_ai_chat_suggestions" id="ai_chat_suggestions"></div>
                         <div class="o_ai_chat_messages" id="ai_chat_messages"></div>
                         <div class="o_ai_chat_input">
                             <textarea id="ai_chat_message" class="o_input" rows="2" placeholder="Escribe tu mensaje... (Enter para enviar, Ctrl+Enter para salto)"></textarea>
@@ -32,11 +39,11 @@
     </record>
 
     <record id="ai_chat_ui_singleton" model="ai.chat.ui">
-        <field name="name">AI Chat UI</field>
+        <field name="name">Odoo AI Copilot</field>
     </record>
 
     <record id="action_ai_chat_form" model="ir.actions.act_window">
-        <field name="name">AI Assistant</field>
+        <field name="name">Odoo AI Copilot</field>
         <field name="res_model">ai.chat.ui</field>
         <field name="view_mode">form</field>
         <field name="view_id" ref="view_ai_chat_ui"/>
@@ -67,8 +74,8 @@
         <field name="context">{'create': False}</field>
     </record>
 
-    <menuitem id="menu_ai_root" name="AI Assistant" sequence="10"/>
+    <menuitem id="menu_ai_root" name="AI Copilot" sequence="10"/>
     <menuitem id="menu_ai_chat" name="Chat" parent="menu_ai_root" action="action_ai_chat_form" sequence="10"/>
-    <menuitem id="menu_ai_chat_history" name="Chat History" parent="menu_ai_root" action="action_ai_chat_list" sequence="20"/>
+    <menuitem id="menu_ai_chat_history" name="Historial" parent="menu_ai_root" action="action_ai_chat_list" sequence="20"/>
 
 </odoo>

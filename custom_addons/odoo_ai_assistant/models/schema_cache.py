@@ -96,6 +96,7 @@ class AISchemaCache(models.Model):
 
     @api.model
     def get_schema(self, force=False, models_filter=None):
+        requested_models = self._get_target_models(models_filter)
         record = self.search([], limit=1)
         if force or not record or not record.updated_at:
             record = self.refresh_schema(models_filter=models_filter)
@@ -108,7 +109,22 @@ class AISchemaCache(models.Model):
             return {}
 
         try:
-            return json.loads(record.schema_json)
+            schema = json.loads(record.schema_json)
+            if not isinstance(schema, dict):
+                return {}
+            if not requested_models:
+                return schema
+            missing = [m for m in requested_models if m not in schema]
+            if missing:
+                record = self.refresh_schema(models_filter=requested_models)
+                schema = json.loads(record.schema_json) if record and record.schema_json else {}
+                if not isinstance(schema, dict):
+                    return {}
+            filtered = {}
+            for model_name in requested_models:
+                if model_name in schema:
+                    filtered[model_name] = schema[model_name]
+            return filtered
         except Exception:
             _logger.exception("AI schema cache JSON parse failed")
             return {}
