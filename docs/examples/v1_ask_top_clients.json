@@ -1,0 +1,76 @@
+{
+  "answer": "Top clientes por facturación:\n1. Deco Addict: 182,000.00\n2. Azure Interior: 75,000.00",
+  "route": "erp_data",
+  "route_selected": "erp_data",
+  "intent_detected": "ranking",
+  "domain_detected": "invoice",
+  "tools_used": [
+    "query_odoo_group"
+  ],
+  "sources": [],
+  "odoo_evidence": [
+    {
+      "tool": "query_odoo_group",
+      "model": "account.move",
+      "domain": [
+        [
+          "move_type",
+          "=",
+          "out_invoice"
+        ],
+        [
+          "state",
+          "=",
+          "posted"
+        ],
+        [
+          "partner_id",
+          "!=",
+          false
+        ]
+      ],
+      "fields": [
+        "partner_id",
+        "amount_total:sum"
+      ],
+      "result": "Top clientes por facturación:\n1. Deco Addict: 182,000.00\n2. Azure Interior: 75,000.00"
+    }
+  ],
+  "latency_ms": 261.45,
+  "tokens_used": 0,
+  "trace_id": "ca41a85f-18a1-4457-9149-6c2ab1c04314",
+  "session_id": "readme-demo",
+  "memory": {
+    "last_route": "erp_data",
+    "last_intent": "ranking",
+    "last_fields": {},
+    "last_tools_used": [
+      "query_odoo_group"
+    ],
+    "last_sources": []
+  },
+  "memory_hit": false,
+  "needs_clarification": false,
+  "grounded": true,
+  "response_faithful": true,
+  "active_model": "account.move",
+  "active_id": null,
+  "memory_updated": false,
+  "answer_mode": "erp_data",
+  "partial_failure": false,
+  "error_type": null,
+  "metrics": {
+    "route_selected": "erp_data",
+    "intent_detected": "ranking",
+    "domain_detected": "invoice",
+    "tools_used": [
+      "query_odoo_group"
+    ],
+    "memory_hit": false,
+    "grounded": true,
+    "response_faithful": true,
+    "active_model": "account.move",
+    "active_id": null,
+    "memory_updated": false
+  }
+}

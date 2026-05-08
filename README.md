@@ -1,5 +1,7 @@
 # Odoo AI Copilot
 
+![CI](https://github.com/FidelCruz96/odoo-ai-copilot/actions/workflows/ci.yml/badge.svg)
+
 Orquestador conversacional para Odoo 18 que responde preguntas de negocio usando datos reales del ERP, memoria de sesión, herramientas de solo lectura y Knowledge/RAG opcional.
 
 El servicio principal ya no funciona como un chatbot simple. El endpoint actual `POST /v1/ask` ejecuta un **orquestador híbrido** que entiende la pregunta, decide la ruta de resolución, construye un plan de tools, consulta Odoo o RAG según corresponda y compone una respuesta con evidencia y métricas.
@@ -31,6 +33,8 @@ y obtener respuestas basadas en datos reales del ERP o documentación indexada.
 - GitHub Actions con tests Python, validación de Compose y build Docker del AI Service.
 
 ## Arquitectura
+
+![Arquitectura Odoo AI Copilot](docs/assets/architecture.svg)
 
 ```text
 Usuario
@@ -89,6 +93,18 @@ El endpoint `POST /v1/ask` sigue este flujo:
 - Aclaraciones cuando falta contexto.
 - Respuestas con `odoo_evidence`, `sources` y métricas de trazabilidad.
 
+## Business Use Cases
+
+| Área | Caso | Ruta | Tool principal |
+| --- | --- | --- | --- |
+| Ventas | Conteo de ventas confirmadas | `erp_data` | `query_odoo_count` |
+| Facturación | Ranking de clientes por facturación | `erp_data` | `query_odoo_group` |
+| Cuentas por cobrar | Facturas pendientes o vencidas | `erp_data` | `query_odoo_search` / `query_odoo_group` |
+| Compras | Órdenes pendientes de recepción | `erp_data` | `query_odoo_search` |
+| Operaciones | Resumen operativo del día | `erp_data` | múltiples `query_odoo_count` |
+| Políticas internas | Preguntas sobre procesos y reglas | `knowledge` | `search_knowledge` |
+| Compliance operativo | Validar una compra contra una política | `mixed` | Odoo tools + `search_knowledge` |
+
 ## Ejemplos
 
 ### Conteo ERP
@@ -114,6 +130,39 @@ El endpoint `POST /v1/ask` sigue este flujo:
 **Usuario:** `esta compra cumple la politica de aprobacion`
 
 **Orquestador:** consulta Odoo y contrasta con documentación indexada.
+
+## Demo Assets
+
+![Copilot dentro de Odoo](docs/assets/odoo-copilot-chat.png)
+
+Assets versionados:
+
+- Screenshot real del Copilot en Odoo: `docs/assets/odoo-copilot-chat.png`
+- Diagrama visual: `docs/assets/architecture.svg`
+- Ejemplo JSON real: `docs/examples/v1_ask_top_clients.json`
+
+Pendientes de captura multimedia:
+
+- GIF corto mostrando pregunta, respuesta y acciones.
+- Video demo de 2-3 minutos.
+
+Validación realizada para captura visual:
+
+- Odoo local responde en `http://localhost:8069`.
+- DB test usada: `admin`.
+- Action Odoo del Copilot: `action_ai_chat_form`, id local `470`.
+- Captura autenticada con Chrome headless + DevTools Protocol: OK.
+- Pregunta usada en la captura: `top clientes por facturacion`.
+- Respuesta renderizada: ranking de clientes por facturación con evidencia ERP.
+
+Guion sugerido para el video demo:
+
+1. Abrir Odoo y entrar a `AI Copilot > Chat`.
+2. Preguntar `cuantas ventas hay`.
+3. Preguntar `top clientes por facturacion`.
+4. Mostrar evidencia/métricas de la respuesta.
+5. Abrir una venta o factura desde el contexto.
+6. Cerrar explicando que las consultas ERP son de solo lectura y las rutas determinísticas usan 0 tokens LLM.
 
 ## Ejecución local
 
@@ -199,6 +248,34 @@ curl -s http://localhost:8001/v1/ask \
   -d '{"question":"top clientes por facturacion","session_id":"demo"}'
 ```
 
+Respuesta real de ejemplo, capturada contra la DB local `admin`:
+
+```json
+{
+  "answer": "Top clientes por facturación:\n1. Deco Addict: 182,000.00\n2. Azure Interior: 75,000.00",
+  "route_selected": "erp_data",
+  "intent_detected": "ranking",
+  "domain_detected": "invoice",
+  "tools_used": ["query_odoo_group"],
+  "latency_ms": 261.45,
+  "tokens_used": 0,
+  "grounded": true,
+  "response_faithful": true,
+  "active_model": "account.move",
+  "metrics": {
+    "route_selected": "erp_data",
+    "intent_detected": "ranking",
+    "domain_detected": "invoice",
+    "tools_used": ["query_odoo_group"],
+    "memory_hit": false,
+    "grounded": true,
+    "response_faithful": true
+  }
+}
+```
+
+JSON completo: `docs/examples/v1_ask_top_clients.json`.
+
 ### Addon Odoo
 
 El addon expone endpoints internos usados por el AI Service:
@@ -265,6 +342,36 @@ curl -s http://localhost:8001/v1/ask \
   -d '{"question":"cuantas ventas hay","session_id":"demo"}'
 ```
 
+## Métricas
+
+Medición local contra contenedores de prueba el 2026-05-08:
+
+| Caso | Pregunta | Ruta | Tools | Latencia | Tokens |
+| --- | --- | --- | --- | ---: | ---: |
+| Conteo ERP | `cuantas ventas hay` | `erp_data` | `query_odoo_count` | 33.64 ms | 0 |
+| Ranking ERP | `top clientes por facturacion` | `erp_data` | `query_odoo_group` | 22.33 ms | 0 |
+| Consulta sin entidad activa | `que productos se vendieron` | `fallback` | ninguna | 0.46 ms | 0 |
+
+Resumen de la muestra:
+
+- Promedio de latencia: 18.81 ms.
+- Máxima latencia observada: 33.64 ms.
+- Tokens LLM usados en rutas ERP determinísticas validadas: 0.
+- Costo marginal de modelo en esas rutas determinísticas: 0, porque no llaman al LLM.
+- Reducción de costo: alta para consultas ERP cubiertas por planner determinístico; falta benchmark de producción contra un flujo LLM-only para expresar un porcentaje real.
+
+Casos actualmente soportados con ruta determinística:
+
+- Conteos de ventas/facturas/compras.
+- Rankings por cliente.
+- Búsquedas/listados de ventas, facturas, compras y pickings.
+- Agregaciones con `read_group`.
+- Follow-ups cuando existe entidad activa en memoria.
+
+Gap detectado en pruebas:
+
+- Preguntas de líneas como `que productos se vendieron` necesitan una venta/factura/orden activa. Sin entidad activa, todavía caen en `fallback`; debe convertirse en aclaración explícita.
+
 ## CI/CD
 
 El repo incluye GitHub Actions en `.github/workflows/ci.yml`.
@@ -293,6 +400,15 @@ CD real todavía requiere definir:
 - **Memoria estructurada:** permite follow-ups con `session_id`.
 - **RAG opcional:** documentación y políticas se separan de datos vivos del ERP.
 - **Contrato versionado:** `/v1/ask` es el flujo actual; `/ask` queda legacy.
+
+## What I Learned / Trade-offs
+
+- Separar orquestación de UI simplifica el addon Odoo: el módulo solo captura contexto, envía token y renderiza la respuesta.
+- Las rutas determinísticas son mejores para preguntas ERP repetibles: reducen costo, latencia y variación de respuesta.
+- El RAG debe ser opcional: no todas las instalaciones tienen documentación indexada ni `OPENAI_API_KEY` disponible.
+- El acceso a Odoo debe pasar por tools de solo lectura y validación de schema; dar acceso directo a DB o al ORM sin límites eleva demasiado el riesgo.
+- Mantener `/ask` como legacy baja el riesgo de migración, pero aumenta superficie de mantenimiento mientras `/v1/ask` termina de cubrir más casos.
+- El planner evita tool calling libre en preguntas críticas, a cambio de requerir más intents determinísticos para cubrir consultas nuevas.
 
 ## Limitaciones
 
