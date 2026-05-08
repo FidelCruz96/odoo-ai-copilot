@@ -7,6 +7,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,53 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> dict[str, A
         "tokens_used": response.get("tokens_used"),
         "grounded": response.get("grounded"),
         "response_faithful": response.get("response_faithful"),
+        "error_type": response.get("error_type") or response.get("error_code"),
+    }
+
+
+def _percentile(values: list[float], percentile: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, max(0, round((len(ordered) - 1) * percentile)))
+    return round(ordered[index], 2)
+
+
+def summarize_results(results: list[dict[str, Any]], duration_ms: float) -> dict[str, Any]:
+    latencies = [float(item["latency_ms"]) for item in results if isinstance(item.get("latency_ms"), (int, float))]
+    token_values = [int(item["tokens_used"]) for item in results if isinstance(item.get("tokens_used"), int)]
+    tools = Counter(tool for item in results for tool in (item.get("tools") or []))
+    routes = Counter(str(item.get("route")) for item in results if item.get("route"))
+    intents = Counter(str(item.get("intent")) for item in results if item.get("intent"))
+    error_types = Counter(
+        str(item.get("error_type") or failure.split(":", 1)[0])
+        for item in results
+        if not item.get("ok")
+        for failure in (item.get("failures") or ["unknown_error"])
+    )
+    passed = sum(1 for item in results if item.get("ok"))
+    failed = len(results) - passed
+
+    return {
+        "pass_rate": round((passed / len(results)) * 100, 2) if results else 0.0,
+        "duration_ms": round(duration_ms, 2),
+        "latency_ms": {
+            "avg": round(sum(latencies) / len(latencies), 2) if latencies else None,
+            "p50": _percentile(latencies, 0.50),
+            "p95": _percentile(latencies, 0.95),
+            "max": round(max(latencies), 2) if latencies else None,
+        },
+        "tokens": {
+            "total": sum(token_values),
+            "avg": round(sum(token_values) / len(token_values), 2) if token_values else 0.0,
+        },
+        "routes": dict(sorted(routes.items())),
+        "intents": dict(sorted(intents.items())),
+        "tools": dict(sorted(tools.items())),
+        "error_types": dict(sorted(error_types.items())),
+        "failed_case_ids": [item["id"] for item in results if not item.get("ok")],
+        "passed": passed,
+        "failed": failed,
     }
 
 
@@ -137,7 +185,19 @@ def call_http(url: str, token: str | None, case: dict[str, Any], uid: int | None
 def run_eval(args: argparse.Namespace) -> dict[str, Any]:
     dataset = load_jsonl(Path(args.dataset))
     if args.dry_run:
-        return {"ok": True, "cases": len(dataset), "results": []}
+        return {
+            "ok": True,
+            "mode": "dry_run",
+            "cases": len(dataset),
+            "passed": len(dataset),
+            "failed": 0,
+            "duration_ms": 0.0,
+            "summary": {
+                "dataset_valid": True,
+                "case_ids": [case["id"] for case in dataset],
+            },
+            "results": [],
+        }
 
     results = []
     started = time.perf_counter()
@@ -156,12 +216,15 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
 
     passed = sum(1 for item in results if item["ok"])
     failed = len(results) - passed
+    duration_ms = round((time.perf_counter() - started) * 1000, 2)
+    summary = summarize_results(results, duration_ms)
     return {
         "ok": failed == 0,
         "cases": len(results),
         "passed": passed,
         "failed": failed,
-        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+        "duration_ms": duration_ms,
+        "summary": summary,
         "results": results,
     }
 

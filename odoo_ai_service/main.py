@@ -1,5 +1,4 @@
 import logging
-import json
 import hmac
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
@@ -8,6 +7,7 @@ from app.agents.orchestrator import ask_hybrid_agent
 from app.api.schemas import AskRequest, KnowledgeQueryRequest
 from app.core.config import get_settings
 from app.knowledge.ingest_service import get_ingest_service
+from app.observability import emit_event
 from app.tools.search_knowledge import search_knowledge
 from schemas.chat_schema import Question
 from agents.assistant_agent import ask_agent
@@ -91,29 +91,16 @@ if hasattr(app, "middleware"):
 def ask(q: Question):
     context = q.context or {}
     request_id = context.get("request_id") if isinstance(context, dict) else None
-    logger.info(
-        "ASK_START %s",
-        json.dumps(
-            {
-                "request_id": request_id,
-                "question": q.question,
-                "has_history": bool(q.history),
-            },
-            ensure_ascii=False,
-        ),
-    )
+    emit_event(logger, "LEGACY_REQUEST_START", trace_id=request_id, endpoint="/ask", question_length=len(q.question or ""), has_history=bool(q.history))
     result = ask_agent(q.question, context=q.context, history=q.history)
-    logger.info(
-        "ASK_END %s",
-        json.dumps(
-            {
-                "request_id": result.get("request_id"),
-                "answer_mode": result.get("answer_mode"),
-                "error_code": result.get("error_code"),
-                "latency_ms": (result.get("metadata") or {}).get("latency_ms"),
-            },
-            ensure_ascii=False,
-        ),
+    emit_event(
+        logger,
+        "LEGACY_REQUEST_END",
+        trace_id=result.get("request_id"),
+        endpoint="/ask",
+        answer_mode=result.get("answer_mode"),
+        error_code=result.get("error_code"),
+        latency_ms=(result.get("metadata") or {}).get("latency_ms"),
     )
 
     return result
@@ -152,17 +139,15 @@ async def ingest(module: str | None = Form(default=None), files: list[UploadFile
 
 @app.post("/v1/ask")
 def ask_v1(payload: AskRequest):
-    logger.info(
-        "V1_ASK_START %s",
-        json.dumps(
-            {
-                "request_id": (payload.context or {}).get("request_id"),
-                "session_id": payload.session_id,
-                "question": payload.question,
-                "has_history": bool(payload.history),
-            },
-            ensure_ascii=False,
-        ),
+    request_id = (payload.context or {}).get("request_id")
+    emit_event(
+        logger,
+        "REQUEST_START",
+        trace_id=request_id,
+        endpoint="/v1/ask",
+        session_id=payload.session_id,
+        question_length=len(payload.question or ""),
+        has_history=bool(payload.history),
     )
     try:
         result = ask_hybrid_agent(
@@ -171,10 +156,28 @@ def ask_v1(payload: AskRequest):
             context=payload.context,
             history=payload.history,
         )
-        logger.info("V1_ASK_END %s", json.dumps(_ask_v1_log_payload(result), ensure_ascii=False))
+        log_payload = _ask_v1_log_payload(result)
+        emit_event(
+            logger,
+            "ROUTE_SELECTED",
+            trace_id=log_payload.get("trace_id"),
+            route_selected=log_payload.get("route_selected"),
+            intent_detected=log_payload.get("intent_detected"),
+            domain_detected=log_payload.get("domain_detected"),
+            tools_used=log_payload.get("tools_used"),
+        )
+        emit_event(logger, "REQUEST_END", endpoint="/v1/ask", **log_payload)
         return result
     except Exception as exc:
         logger.exception("V1_ASK_ERROR")
+        emit_event(
+            logger,
+            "REQUEST_ERROR",
+            trace_id=request_id,
+            endpoint="/v1/ask",
+            session_id=payload.session_id,
+            error_type=type(exc).__name__,
+        )
         return JSONResponse(
             status_code=503,
             content={

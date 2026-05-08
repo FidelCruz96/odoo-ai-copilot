@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 from typing import Any
 
 from app.agents.types import AgentContext, Entity, ToolArguments, ToolExecutionResult, ToolStep
+from app.observability import emit_event
 from app.tools.knowledge_tools import run_search_knowledge
 from app.tools.odoo_tools import query_odoo_count, query_odoo_group, query_odoo_read, query_odoo_search
 
@@ -128,15 +130,26 @@ def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: Ag
                 trace_id=trace_id,
             )
 
+        tool_started_at = perf_counter()
         try:
             result = tool_fn(**arguments)
         except Exception:
+            latency_ms = round((perf_counter() - tool_started_at) * 1000, 2)
             partial_failure = bool(tools_used)
             logger.exception(
                 "tool_execution_failed trace_id=%s tool=%s model=%s",
                 trace_id,
                 tool_name,
                 arguments.get("model"),
+            )
+            emit_event(
+                logger,
+                "TOOL_ERROR",
+                trace_id=trace_id,
+                tool=tool_name,
+                model=arguments.get("model"),
+                latency_ms=latency_ms,
+                error_type="tool_exception",
             )
             return _failure_result(
                 error_type="tool_exception",
@@ -149,6 +162,17 @@ def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: Ag
         tools_used.append(tool_name)
         results.append({"tool": tool_name, "args": _public_arguments(arguments), "result": result})
         previous_result = result
+        latency_ms = round((perf_counter() - tool_started_at) * 1000, 2)
+        emit_event(
+            logger,
+            "TOOL_EXECUTED",
+            trace_id=trace_id,
+            tool=tool_name,
+            model=arguments.get("model"),
+            latency_ms=latency_ms,
+            success=not (isinstance(result, dict) and result.get("error")),
+            error_type=result.get("error") if isinstance(result, dict) else None,
+        )
 
         if isinstance(result, dict) and result.get("error"):
             partial_failure = True
