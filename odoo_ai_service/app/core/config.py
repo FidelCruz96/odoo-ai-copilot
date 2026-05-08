@@ -26,6 +26,8 @@ class Settings:
     chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", "100"))
     embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))
     enable_knowledge: bool = _as_bool(os.getenv("ENABLE_KNOWLEDGE"), default=True)
+    ai_service_api_key: str | None = os.getenv("AI_SERVICE_API_KEY") or os.getenv("ODOO_AI_TOKEN")
+    ai_service_auth_required: bool = _as_bool(os.getenv("AI_SERVICE_AUTH_REQUIRED"), default=True)
 
 
 _SETTINGS = Settings()

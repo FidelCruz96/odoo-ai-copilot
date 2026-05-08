@@ -128,6 +128,44 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(result["metrics"]["route_selected"], "knowledge")
         self.assertEqual(result["metrics"]["tools_used"], ["search_knowledge"])
 
+    def test_sale_count_uses_odoo_count_tool(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_count"],
+            "results": [
+                {"tool": "query_odoo_count", "args": {"model": "sale.order"}, "result": 24},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("cuantas ventas hay", session_id="flow-count", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertEqual(result["tools_used"], ["query_odoo_count"])
+        self.assertTrue(result["grounded"])
+        self.assertIn("24 ventas", result["answer"])
+        self.assertEqual(execute_plan.call_args.args[0][0]["tool"], "query_odoo_count")
+
+    def test_invoice_ranking_uses_odoo_group_tool(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_group"],
+            "results": [
+                {
+                    "tool": "query_odoo_group",
+                    "args": {"model": "account.move"},
+                    "result": [{"partner_id": [1, "Cliente A"], "amount_total": 100.0}],
+                },
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("top clientes por facturacion", session_id="flow-rank", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertEqual(result["tools_used"], ["query_odoo_group"])
+        self.assertTrue(result["grounded"])
+        self.assertIn("Cliente A", result["answer"])
+        self.assertEqual(execute_plan.call_args.args[0][0]["tool"], "query_odoo_group")
+
     def test_sale_amount_lookup_with_business_code_hint(self):
         with patch("app.agents.orchestrator.execute_plan", return_value={
             "success": True,

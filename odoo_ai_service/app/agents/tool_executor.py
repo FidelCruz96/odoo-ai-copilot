@@ -12,6 +12,28 @@ TOOL_REGISTRY = {
     "search_knowledge": run_search_knowledge,
 }
 
+MODEL_ENTITY_LABELS = {
+    "sale.order": "la venta",
+    "sale.order.line": "la línea de venta",
+    "purchase.order": "la compra",
+    "purchase.order.line": "la línea de compra",
+    "account.move": "la factura",
+    "stock.picking": "el picking",
+    "res.partner": "el contacto",
+    "product.product": "el producto",
+}
+
+
+def _entity_not_found_message(entity: dict | None, arguments: dict | None = None) -> str:
+    model = None
+    if isinstance(entity, dict):
+        model = entity.get("model")
+    if not model and isinstance(arguments, dict):
+        model = arguments.get("model")
+    label = MODEL_ENTITY_LABELS.get(model, "la entidad solicitada")
+    code = entity.get("code") if isinstance(entity, dict) and entity.get("code") else None
+    return f"No encontré {label} {code}." if code else f"No encontré {label}."
+
 
 def _resolve_dynamic_args(arguments: dict, previous_result):
     resolved = dict(arguments or {})
@@ -36,11 +58,10 @@ def execute_plan(plan: list[dict], entity: dict | None = None) -> dict:
         tool_name = step.get("tool")
         arguments = _resolve_dynamic_args(step.get("args") or {}, previous_result)
         if tool_name == "query_odoo_read" and not arguments.get("ids"):
-            code = entity.get("code") if isinstance(entity, dict) else "la entidad solicitada"
             return {
                 "success": False,
                 "error_type": "entity_not_found",
-                "message": f"No encontré la compra {code}.",
+                "message": _entity_not_found_message(entity, arguments),
                 "tools_used": tools_used,
                 "results": results,
                 "partial_failure": partial_failure,
@@ -74,11 +95,10 @@ def execute_plan(plan: list[dict], entity: dict | None = None) -> dict:
             }
 
         if tool_name == "query_odoo_search" and isinstance(result, list) and not result:
-            code = entity.get("code") if isinstance(entity, dict) else "la entidad solicitada"
             return {
                 "success": False,
                 "error_type": "entity_not_found",
-                "message": f"No encontré la compra {code}.",
+                "message": _entity_not_found_message(entity, arguments),
                 "tools_used": tools_used,
                 "results": results,
                 "partial_failure": partial_failure,

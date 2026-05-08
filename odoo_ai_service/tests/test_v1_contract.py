@@ -117,6 +117,16 @@ main = importlib.import_module("main")
 
 
 class TestV1Contract(unittest.TestCase):
+    def test_ai_service_auth_helpers_validate_configured_token(self):
+        with patch.object(main, "settings", types.SimpleNamespace(ai_service_api_key="secret")):
+            self.assertTrue(main._is_valid_service_token("secret"))
+            self.assertFalse(main._is_valid_service_token("wrong"))
+
+    def test_ai_service_auth_helpers_mark_sensitive_paths(self):
+        self.assertTrue(main._is_protected_path("/v1/ask"))
+        self.assertTrue(main._is_protected_path("/v1/ingest"))
+        self.assertFalse(main._is_protected_path("/v1/health"))
+
     def test_health_contract(self):
         result = main.health()
         self.assertEqual(result["status"], "ok")

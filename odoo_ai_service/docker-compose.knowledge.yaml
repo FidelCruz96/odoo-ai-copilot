@@ -2,20 +2,17 @@ services:
   web:
     environment:
       AI_SERVICE_URL: http://ai_service:8000/v1/ask
-    volumes:
-      - ./odoo_ai_service/odoo_addons_overrides/odoo_ai_assistant/controllers/__init__.py:/var/lib/odoo/custom_addons/custom_addons/odoo_ai_assistant/controllers/__init__.py
-      - ./odoo_ai_service/odoo_addons_overrides/odoo_ai_assistant/controllers/ai_bridge_controller.py:/var/lib/odoo/custom_addons/custom_addons/odoo_ai_assistant/controllers/ai_bridge_controller.py
 
   db_knowledge:
     image: pgvector/pgvector:pg16
-    container_name: ai_knowledge_db
+    container_name: ${KNOWLEDGE_DB_CONTAINER_NAME:-ai_knowledge_db_test}
     environment:
       POSTGRES_DB: knowledge_db
       POSTGRES_USER: odoo
       POSTGRES_PASSWORD: odoo
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
-      - "5433:5432"
+      - "${KNOWLEDGE_DB_PORT:-5434}:5432"
     volumes:
       - knowledge_db_data:/var/lib/postgresql/data
 

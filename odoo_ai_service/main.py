@@ -1,5 +1,6 @@
 import logging
 import json
+import hmac
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -45,6 +46,46 @@ def _ask_v1_log_payload(result: dict) -> dict:
     }
 
 app = FastAPI(title=settings.app_name, version=settings.app_version)
+PROTECTED_PATHS = {
+    "/ask",
+    "/v1/ask",
+    "/v1/ingest",
+    "/v1/knowledge/query",
+}
+
+
+def _is_protected_path(path: str) -> bool:
+    return path in PROTECTED_PATHS
+
+
+def _is_valid_service_token(provided: str | None) -> bool:
+    expected = settings.ai_service_api_key
+    if not expected:
+        return False
+    return bool(provided) and hmac.compare_digest(str(provided), str(expected))
+
+
+if hasattr(app, "middleware"):
+    @app.middleware("http")
+    async def require_ai_service_token(request, call_next):
+        if not settings.ai_service_auth_required or not _is_protected_path(request.url.path):
+            return await call_next(request)
+
+        provided = (
+            request.headers.get("X-AI-Service-Token")
+            or request.headers.get("X-AI-Token")
+            or request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+        )
+        if not settings.ai_service_api_key:
+            logger.error("AI service auth misconfigured: missing AI_SERVICE_API_KEY/ODOO_AI_TOKEN")
+            return JSONResponse(
+                status_code=503,
+                content={"error_code": "ERR_AUTH_NOT_CONFIGURED", "error": "Servicio IA no configurado para autenticación."},
+            )
+        if not _is_valid_service_token(provided):
+            return JSONResponse(status_code=401, content={"error_code": "ERR_UNAUTHORIZED", "error": "No autorizado."})
+
+        return await call_next(request)
 
 @app.post("/ask")
 def ask(q: Question):

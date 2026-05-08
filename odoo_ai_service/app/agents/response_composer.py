@@ -53,6 +53,48 @@ def compose_amount_lookup(record: dict, domain: str | None = None) -> str:
     return f"{label} {record.get('name')} tiene un monto total de {amount_label}."
 
 
+def compose_count_result(count, domain: str | None = None) -> str:
+    try:
+        value = int(count or 0)
+    except Exception:
+        value = 0
+    labels = {
+        "sale": "ventas",
+        "purchase": "compras",
+        "invoice": "facturas",
+        "inventory": "pickings",
+        "product": "productos",
+        "partner": "contactos",
+    }
+    return f"Encontré {value} {labels.get(domain, 'registros')} en Odoo."
+
+
+def compose_ranking_result(rows: list, domain: str | None = None) -> str:
+    if not isinstance(rows, list) or not rows:
+        return "No encontré registros para construir el ranking."
+
+    title = "Ranking por monto"
+    if domain == "invoice":
+        title = "Top clientes por facturación"
+    elif domain == "sale":
+        title = "Top clientes por ventas"
+    elif domain == "purchase":
+        title = "Top proveedores por compras"
+
+    lines = [f"{title}:"]
+    for index, row in enumerate(rows[:5], start=1):
+        if not isinstance(row, dict):
+            continue
+        partner = row.get("partner_id")
+        if isinstance(partner, (list, tuple)) and len(partner) >= 2:
+            name = partner[1]
+        else:
+            name = str(partner or "Sin contacto")
+        amount = row.get("amount_total", row.get("amount_total:sum", 0.0))
+        lines.append(f"{index}. {name}: {format_currency(amount, None)}")
+    return "\n".join(lines)
+
+
 def _extract_threshold_from_knowledge(knowledge_result: dict | None) -> float | None:
     text = ((knowledge_result or {}).get("answer") or "").replace(",", "")
     for token in text.split():

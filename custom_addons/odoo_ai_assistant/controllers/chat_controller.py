@@ -359,6 +359,12 @@ def _require_service_token():
     return None
 
 
+def _ai_service_headers():
+    if not AI_SERVICE_TOKEN:
+        return {}
+    return {"X-AI-Service-Token": AI_SERVICE_TOKEN}
+
+
 def _get_session_key(client_context):
     if not isinstance(client_context, dict):
         return None
@@ -566,6 +572,57 @@ def _resolve_navigation_for_model(model_name, open_type="list"):
     }
 
 
+def _normalize_ai_response_payload(result, answer, request_id, currency_meta):
+    result = result if isinstance(result, dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    metadata = dict(result.get("metadata") or {})
+
+    tools_used = result.get("tools_used") or metrics.get("tools_used") or metadata.get("tools_used") or []
+    route = result.get("route_selected") or result.get("route") or result.get("answer_mode")
+    latency_ms = result.get("latency_ms", metadata.get("latency_ms"))
+    tokens_used = result.get("tokens_used", metadata.get("tokens_used"))
+    active_model = result.get("active_model") or metrics.get("active_model")
+    active_id = result.get("active_id") or metrics.get("active_id")
+
+    context_scope = dict(metadata.get("context_scope") or {})
+    if active_model:
+        context_scope["active_model"] = active_model
+    if active_id:
+        context_scope["active_id"] = active_id
+
+    metadata.update({
+        "route_selected": route,
+        "intent_detected": result.get("intent_detected") or metrics.get("intent_detected"),
+        "domain_detected": result.get("domain_detected") or metrics.get("domain_detected"),
+        "tools_used": tools_used,
+        "sources": result.get("sources") or metadata.get("sources") or [],
+        "odoo_evidence": result.get("odoo_evidence") or metadata.get("odoo_evidence") or [],
+        "latency_ms": latency_ms,
+        "tokens_used": tokens_used,
+        "context_scope": context_scope,
+    })
+    if currency_meta.get("currency_symbol"):
+        metadata["currency_symbol"] = currency_meta.get("currency_symbol")
+    if currency_meta.get("currency_name"):
+        metadata["currency_name"] = currency_meta.get("currency_name")
+
+    return {
+        "answer": answer,
+        "answer_mode": result.get("answer_mode") or route,
+        "answer_type": result.get("answer_type") or ("error" if result.get("error") else None),
+        "needs_clarification": result.get("needs_clarification", False),
+        "clarification_options": result.get("clarification_options") or [],
+        "actions": result.get("actions") or [],
+        "metadata": metadata,
+        "error_code": result.get("error_code") or result.get("error_type"),
+        "request_id": result.get("request_id") or result.get("trace_id") or request_id,
+        "ui": result.get("ui"),
+        "sources": result.get("sources") or [],
+        "odoo_evidence": result.get("odoo_evidence") or [],
+        "metrics": metrics,
+    }
+
+
 class AIChatController(http.Controller):
 
     @http.route("/ai_assistant/ask", type="json", auth="user")
@@ -599,6 +656,8 @@ class AIChatController(http.Controller):
         currency_meta = _company_currency_meta()
         payload = {
             "question": question,
+            "session_id": session_key or request_id,
+            "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
                 "company": {
@@ -618,7 +677,7 @@ class AIChatController(http.Controller):
             },
         }
         try:
-            response = requests.post(ai_url, json=payload, timeout=20)
+            response = requests.post(ai_url, json=payload, headers=_ai_service_headers(), timeout=20)
         except RequestException:
             _logger.exception("AI ask (json) request failed")
             return {
@@ -656,24 +715,7 @@ class AIChatController(http.Controller):
             "answer": answer
         })
 
-        response_payload = {
-            "answer": answer,
-            "answer_mode": result.get("answer_mode"),
-            "answer_type": result.get("answer_type"),
-            "needs_clarification": result.get("needs_clarification", False),
-            "clarification_options": result.get("clarification_options") or [],
-            "actions": result.get("actions") or [],
-            "metadata": result.get("metadata") or {},
-            "error_code": result.get("error_code"),
-            "request_id": result.get("request_id") or request_id,
-            "ui": result.get("ui"),
-        }
-        metadata = dict(response_payload.get("metadata") or {})
-        if currency_meta.get("currency_symbol"):
-            metadata["currency_symbol"] = currency_meta.get("currency_symbol")
-        if currency_meta.get("currency_name"):
-            metadata["currency_name"] = currency_meta.get("currency_name")
-        response_payload["metadata"] = metadata
+        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta)
         _logger.info(
             "AI_ASK_JSON_END %s",
             json.dumps(
@@ -724,6 +766,8 @@ class AIChatController(http.Controller):
         currency_meta = _company_currency_meta()
         payload = {
             "question": question,
+            "session_id": session_key or request_id,
+            "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
                 "company": {
@@ -743,7 +787,7 @@ class AIChatController(http.Controller):
             },
         }
         try:
-            response = requests.post(ai_url, json=payload, timeout=60)
+            response = requests.post(ai_url, json=payload, headers=_ai_service_headers(), timeout=60)
         except RequestException:
             _logger.exception("AI ask_http request failed")
             return request.make_json_response(
@@ -783,24 +827,7 @@ class AIChatController(http.Controller):
             "answer": answer
         })
 
-        response_payload = {
-            "answer": answer,
-            "answer_mode": result.get("answer_mode"),
-            "answer_type": result.get("answer_type"),
-            "needs_clarification": result.get("needs_clarification", False),
-            "clarification_options": result.get("clarification_options") or [],
-            "actions": result.get("actions") or [],
-            "metadata": result.get("metadata") or {},
-            "error_code": result.get("error_code"),
-            "request_id": result.get("request_id") or request_id,
-            "ui": result.get("ui"),
-        }
-        metadata = dict(response_payload.get("metadata") or {})
-        if currency_meta.get("currency_symbol"):
-            metadata["currency_symbol"] = currency_meta.get("currency_symbol")
-        if currency_meta.get("currency_name"):
-            metadata["currency_name"] = currency_meta.get("currency_name")
-        response_payload["metadata"] = metadata
+        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta)
         _logger.info(
             "AI_ASK_HTTP_END %s",
             json.dumps(

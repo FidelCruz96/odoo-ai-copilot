@@ -24,7 +24,7 @@ class RagService:
     client: OpenAI | None = None
 
     def __post_init__(self) -> None:
-        if self.client is None:
+        if self.client is None and self.settings.openai_api_key:
             self.client = OpenAI(api_key=self.settings.openai_api_key)
 
     def answer_query(self, query_request: QueryRequest) -> QueryResponse:

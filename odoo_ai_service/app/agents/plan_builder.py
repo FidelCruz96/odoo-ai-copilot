@@ -23,9 +23,36 @@ def has_knowledge_tool(plan: list[dict]) -> bool:
     return any(step.get("tool") == "search_knowledge" for step in plan)
 
 
+def _main_model_for_domain(domain: str | None) -> str | None:
+    if domain == "purchase":
+        return "purchase.order"
+    if domain == "sale":
+        return "sale.order"
+    if domain == "invoice":
+        return "account.move"
+    if domain == "inventory":
+        return "stock.picking"
+    if domain == "product":
+        return "product.product"
+    if domain == "partner":
+        return "res.partner"
+    return None
+
+
+def _default_domain_for_domain(domain: str | None) -> list:
+    if domain == "sale":
+        return [["state", "in", ["sale", "done"]]]
+    if domain == "purchase":
+        return [["state", "in", ["purchase", "done"]]]
+    if domain == "invoice":
+        return [["move_type", "=", "out_invoice"], ["state", "=", "posted"]]
+    return []
+
+
 def build_plan(route: str, domain: str | None, intent: str | None, entity: dict | None) -> list[dict]:
     plan: list[dict] = []
     model = entity.get("model") if isinstance(entity, dict) else None
+    domain_model = model or _main_model_for_domain(domain)
 
     if route == CLARIFICATION:
         return []
@@ -75,6 +102,31 @@ def build_plan(route: str, domain: str | None, intent: str | None, entity: dict 
                     },
                 }
             )
+    elif route == ERP_DATA and intent == "count" and domain_model:
+        plan.append(
+            {
+                "tool": "query_odoo_count",
+                "args": {
+                    "model": domain_model,
+                    "domain": _default_domain_for_domain(domain),
+                },
+            }
+        )
+    elif route == ERP_DATA and intent == "ranking" and domain in {"sale", "invoice", "purchase"} and domain_model:
+        amount_field = "amount_total:sum"
+        plan.append(
+            {
+                "tool": "query_odoo_group",
+                "args": {
+                    "model": domain_model,
+                    "domain": _default_domain_for_domain(domain) + [["partner_id", "!=", False]],
+                    "fields": ["partner_id", amount_field],
+                    "groupby": ["partner_id"],
+                    "orderby": "amount_total desc",
+                    "limit": 5,
+                },
+            }
+        )
     elif route == MIXED and intent == "policy_validation":
         if isinstance(entity, dict) and entity.get("id") and model:
             plan.append(

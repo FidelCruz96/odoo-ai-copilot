@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Show Python version
+        run: python --version
+
+      - name: Compile Python files
+        run: python -m compileall -q odoo_ai_service custom_addons/odoo_ai_assistant
+
+      - name: Run unit tests
+        working-directory: odoo_ai_service
+        run: python -m unittest discover -s tests -q
+
+  compose-validation:
+    name: Docker Compose validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate base compose
+        run: docker compose --env-file .env.example config
+
+      - name: Validate Knowledge/RAG compose
+        run: docker compose --env-file .env.example -f docker-compose.yaml -f odoo_ai_service/docker-compose.knowledge.yaml config
+
+  docker-build:
+    name: AI Service Docker build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build AI service image
+        run: docker build -t copilot-odoo-ai-service:ci ./odoo_ai_service

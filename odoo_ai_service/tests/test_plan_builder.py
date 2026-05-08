@@ -24,6 +24,17 @@ class TestPlanBuilder(unittest.TestCase):
         self.assertEqual(plan[0]["tool"], "query_odoo_read")
         self.assertEqual(plan[1]["tool"], "search_knowledge")
 
+    def test_sale_count_plan(self):
+        plan = build_plan(route="erp_data", domain="sale", intent="count", entity=None)
+        self.assertEqual(plan[0]["tool"], "query_odoo_count")
+        self.assertEqual(plan[0]["args"]["model"], "sale.order")
+
+    def test_invoice_ranking_plan(self):
+        plan = build_plan(route="erp_data", domain="invoice", intent="ranking", entity=None)
+        self.assertEqual(plan[0]["tool"], "query_odoo_group")
+        self.assertEqual(plan[0]["args"]["model"], "account.move")
+        self.assertEqual(plan[0]["args"]["groupby"], ["partner_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,9 @@ from app.agents.response_composer import (
     build_odoo_evidence,
     compose_amount_lookup,
     compose_clarification,
+    compose_count_result,
     compose_policy_validation,
+    compose_ranking_result,
     compose_response,
 )
 from app.agents.route_selector import CLARIFICATION, ERP_DATA, FALLBACK, KNOWLEDGE, MIXED, select_route
@@ -73,6 +75,14 @@ def _extract_knowledge_result(execution_result: dict) -> dict | None:
     for row in results:
         if row.get("tool") == "search_knowledge" and isinstance(row.get("result"), dict):
             return row["result"]
+    return None
+
+
+def _extract_first_tool_result(execution_result: dict):
+    results = execution_result.get("results") or []
+    for row in results:
+        if "result" in row:
+            return row.get("result")
     return None
 
 
@@ -329,6 +339,14 @@ def ask_hybrid_agent(
         response_faithful = False
     elif route == ERP_DATA and intent == "amount_lookup" and primary_record:
         answer = compose_amount_lookup(primary_record, domain=domain)
+        grounded = True
+        response_faithful = True
+    elif route == ERP_DATA and intent == "count":
+        answer = compose_count_result(_extract_first_tool_result(execution_result), domain=domain)
+        grounded = True
+        response_faithful = True
+    elif route == ERP_DATA and intent == "ranking":
+        answer = compose_ranking_result(_extract_first_tool_result(execution_result), domain=domain)
         grounded = True
         response_faithful = True
     elif route == KNOWLEDGE:
