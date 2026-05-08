@@ -50,6 +50,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 cover/
+odoo_ai_service/evals/reports/
 
 # Translations
 *.mo
