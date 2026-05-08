@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.agents.types import Entity, IntentName
 
 INTENT_MAP = {
     "amount_lookup": ["monto", "total", "importe", "valor"],
@@ -12,7 +13,7 @@ INTENT_MAP = {
 }
 
 
-def resolve_intent(text: str, domain: str | None = None, entity: dict | None = None) -> str | None:
+def resolve_intent(text: str, domain: str | None = None, entity: Entity | None = None) -> IntentName | str | None:
     value = text or ""
 
     if any(keyword in value for keyword in INTENT_MAP["policy_validation"]):

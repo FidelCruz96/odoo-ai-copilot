@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from app.agents.types import ContextResolution, Entity
 from app.memory.schemas import ActiveEntity, ConversationMemory
 
 
-def resolve_context(entity: dict | None, memory: ConversationMemory | None) -> dict:
+def resolve_context(entity: Entity | None, memory: ConversationMemory | None) -> ContextResolution:
     memory_hit = False
     active_entity = memory.active_entity if isinstance(memory, ConversationMemory) else None
 

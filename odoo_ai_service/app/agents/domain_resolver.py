@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from app.agents.types import DomainName, Entity
 
 DOMAIN_MODEL_MAP = {
     "purchase": {
@@ -48,7 +49,7 @@ def _has_keyword(value: str, keyword: str) -> bool:
     return keyword in value
 
 
-def resolve_domain(text: str, entity: dict | None = None) -> str | None:
+def resolve_domain(text: str, entity: Entity | None = None) -> DomainName | str | None:
     if isinstance(entity, dict):
         entity_type = entity.get("type")
         if entity_type == "purchase_order":

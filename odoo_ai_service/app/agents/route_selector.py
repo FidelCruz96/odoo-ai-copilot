@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.agents.types import Entity, RouteName
+
 
 ERP_DATA = "erp_data"
 KNOWLEDGE = "knowledge"
@@ -11,9 +13,9 @@ FALLBACK = "fallback"
 def select_route(
     domain: str | None,
     intent: str | None,
-    entity: dict | None,
+    entity: Entity | None,
     has_relative_reference_without_context: bool,
-) -> str:
+) -> RouteName:
     if has_relative_reference_without_context:
         return CLARIFICATION
 
