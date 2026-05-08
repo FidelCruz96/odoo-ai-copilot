@@ -80,6 +80,19 @@ class TestOdooGetToolSecurity(unittest.TestCase):
         self.assertEqual(payload["access_context"]["uid"], 2)
         self.assertEqual(payload["access_context"]["request_id"], "req-1")
 
+    def test_query_odoo_handles_requests_exception_as_tool_error(self):
+        import requests
+
+        with patch("tools.odoo_get_tool.requests.post", side_effect=requests.Timeout("timeout")):
+            result = query_odoo(
+                model="sale.order",
+                operation="search",
+                limit=10,
+                context={"request_id": "req-timeout", "security": {"uid": 2, "company_ids": [1]}},
+            )
+
+        self.assertTrue(result["error"].startswith("odoo_request_error:"))
+
 
 if __name__ == "__main__":
     unittest.main()

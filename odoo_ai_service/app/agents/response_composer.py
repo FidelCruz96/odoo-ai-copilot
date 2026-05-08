@@ -4,7 +4,7 @@ from __future__ import annotations
 def format_currency(amount, currency_value) -> str:
     try:
         value = float(amount or 0.0)
-    except Exception:
+    except (TypeError, ValueError):
         value = 0.0
     currency_name = None
     if isinstance(currency_value, (list, tuple)) and len(currency_value) >= 2:
@@ -56,7 +56,7 @@ def compose_amount_lookup(record: dict, domain: str | None = None) -> str:
 def compose_count_result(count, domain: str | None = None) -> str:
     try:
         value = int(count or 0)
-    except Exception:
+    except (TypeError, ValueError):
         value = 0
     labels = {
         "sale": "ventas",
@@ -101,7 +101,7 @@ def _extract_threshold_from_knowledge(knowledge_result: dict | None) -> float | 
         stripped = token.replace("s/", "").replace("S/", "").strip(" .:")
         try:
             value = float(stripped)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         if value >= 1000:
             return value

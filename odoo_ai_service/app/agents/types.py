@@ -92,6 +92,7 @@ class ToolExecutionResult(TypedDict, total=False):
     partial_failure: bool
     error_type: str | None
     message: str | None
+    trace_id: str
 
 
 class KnowledgeSource(TypedDict, total=False):

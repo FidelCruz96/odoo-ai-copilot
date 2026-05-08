@@ -33,6 +33,12 @@ BLOCKED_FIELDS = {
 logger = logging.getLogger("odoo_ai_service")
 
 
+def _response_excerpt(response, max_chars=500):
+    text = getattr(response, "text", "") or ""
+    text = re.sub(r"(?i)(token|password|api_key|secret|access_token)(['\"\s:=]+)[^,'\"\s}]+", r"\1\2[REDACTED]", text)
+    return text[:max_chars]
+
+
 def _build_access_context(context):
     if not isinstance(context, dict):
         return {}
@@ -198,27 +204,40 @@ def query_odoo(model, operation="search_read", domain=None, fields=None, ids=Non
     headers = {}
     if odoo_ai_token:
         headers["X-AI-Token"] = odoo_ai_token
-    response = requests.post(ODOO_API, params=params, json=rpc_payload, headers=headers, timeout=20)
+    try:
+        response = requests.post(ODOO_API, params=params, json=rpc_payload, headers=headers, timeout=20)
+    except requests.RequestException as e:
+        logger.exception(
+            "odoo_get_tool request error model=%s operation=%s uid=%s request_id=%s",
+            model,
+            operation,
+            access_context.get("uid") or access_context.get("user_id"),
+            access_context.get("request_id"),
+        )
+        return {"error": f"odoo_request_error: {e}"}
+
     if not response.ok:
-        logger.error("odoo_get_tool status=%s body=%s", response.status_code, response.text)
+        logger.error(
+            "odoo_get_tool status=%s body=%s request_id=%s",
+            response.status_code,
+            _response_excerpt(response),
+            access_context.get("request_id"),
+        )
         return {"error": f"odoo_http_{response.status_code}"}
 
     try:
         data = response.json()
-    except Exception:
-        logger.exception("odoo_get_tool response not JSON: %s", response.text)
+    except ValueError:
+        logger.exception("odoo_get_tool response not JSON: %s", _response_excerpt(response))
         return {"error": "odoo_non_json_response"}
 
     # Odoo controller returns JSON via make_json_response(result)
     # which can be either a dict (with "result") or a raw list.
     result = data.get("result", data) if isinstance(data, dict) else data
-    try:
-        if isinstance(result, list):
-            logger.info("odoo_get_tool result list size=%s sample=%s", len(result), result[:2])
-        else:
-            logger.info("odoo_get_tool result type=%s sample=%s", type(result).__name__, str(result)[:500])
-    except Exception:
-        logger.exception("odoo_get_tool result log failed")
+    if isinstance(result, list):
+        logger.info("odoo_get_tool result list size=%s request_id=%s", len(result), access_context.get("request_id"))
+    else:
+        logger.info("odoo_get_tool result type=%s request_id=%s", type(result).__name__, access_context.get("request_id"))
 
     return result
 
@@ -279,13 +298,13 @@ def get_schema(models, force=False, context=None):
         return {"error": f"odoo_request_error: {e}"}
 
     if not response.ok:
-        logger.error("odoo_get_schema status=%s body=%s", response.status_code, response.text)
+        logger.error("odoo_get_schema status=%s body=%s", response.status_code, _response_excerpt(response))
         return {"error": f"odoo_http_{response.status_code}"}
 
     try:
         data = response.json()
-    except Exception:
-        logger.exception("odoo_get_schema response not JSON: %s", response.text)
+    except ValueError:
+        logger.exception("odoo_get_schema response not JSON: %s", _response_excerpt(response))
         return {"error": "odoo_non_json_response"}
 
     result = data.get("result", data) if isinstance(data, dict) else data

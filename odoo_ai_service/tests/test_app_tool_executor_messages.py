@@ -100,6 +100,26 @@ class TestAppToolExecutorMessages(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["results"][0]["result"], 7)
         self.assertEqual(captured["context"], context)
+        self.assertNotIn("context", result["results"][0]["args"])
+        self.assertEqual(result["trace_id"], "req-iam")
+
+    def test_tool_exception_returns_structured_error_with_trace_id(self):
+        plan = [{"tool": "query_odoo_count", "args": {"model": "sale.order", "domain": []}}]
+        registry = dict(tool_executor.TOOL_REGISTRY)
+
+        def failing_count(**kwargs):
+            raise RuntimeError("boom")
+
+        registry["query_odoo_count"] = failing_count
+        context = {"request_id": "req-fail", "security": {"uid": 9, "company_ids": [1]}}
+
+        with patch.object(tool_executor, "TOOL_REGISTRY", registry):
+            result = tool_executor.execute_plan(plan, context=context)
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error_type"], "tool_exception")
+        self.assertEqual(result["trace_id"], "req-fail")
+        self.assertIn("Trace ID: req-fail", result["message"])
 
 
 if __name__ == "__main__":

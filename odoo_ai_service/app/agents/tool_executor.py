@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.agents.types import AgentContext, Entity, ToolArguments, ToolExecutionResult, ToolStep
@@ -15,6 +16,7 @@ TOOL_REGISTRY = {
     "search_knowledge": run_search_knowledge,
 }
 ODOO_TOOL_PREFIX = "query_odoo_"
+logger = logging.getLogger("odoo_ai_service")
 
 MODEL_ENTITY_LABELS = {
     "sale.order": "la venta",
@@ -59,66 +61,122 @@ def _attach_runtime_context(tool_name: str | None, arguments: ToolArguments, con
     return resolved
 
 
+def _trace_id_from_context(context: AgentContext | dict | None) -> str | None:
+    if not isinstance(context, dict):
+        return None
+    trace_id = context.get("request_id")
+    return str(trace_id) if trace_id else None
+
+
+def _public_arguments(arguments: ToolArguments) -> ToolArguments:
+    public_args = dict(arguments or {})
+    public_args.pop("context", None)
+    return public_args
+
+
+def _failure_result(
+    *,
+    error_type: str,
+    message: str,
+    tools_used: list[str],
+    results: list[dict],
+    partial_failure: bool,
+    trace_id: str | None = None,
+) -> ToolExecutionResult:
+    payload: ToolExecutionResult = {
+        "success": False,
+        "error_type": error_type,
+        "message": message,
+        "tools_used": tools_used,
+        "results": results,
+        "partial_failure": partial_failure,
+    }
+    if trace_id:
+        payload["trace_id"] = trace_id
+    return payload
+
+
 def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: AgentContext | dict | None = None) -> ToolExecutionResult:
     tools_used: list[str] = []
     results: list[dict] = []
     previous_result: Any = None
     partial_failure = False
+    trace_id = _trace_id_from_context(context)
 
     for step in plan:
         tool_name = step.get("tool")
         arguments = _resolve_dynamic_args(step.get("args") or {}, previous_result)
         arguments = _attach_runtime_context(tool_name, arguments, context)
         if tool_name == "query_odoo_read" and not arguments.get("ids"):
-            return {
-                "success": False,
-                "error_type": "entity_not_found",
-                "message": _entity_not_found_message(entity, arguments),
-                "tools_used": tools_used,
-                "results": results,
-                "partial_failure": partial_failure,
-            }
+            return _failure_result(
+                error_type="entity_not_found",
+                message=_entity_not_found_message(entity, arguments),
+                tools_used=tools_used,
+                results=results,
+                partial_failure=partial_failure,
+                trace_id=trace_id,
+            )
 
         tool_fn = TOOL_REGISTRY.get(tool_name)
         if tool_fn is None:
-            return {
-                "success": False,
-                "error_type": "tool_not_found",
-                "message": f"Tool no registrada: {tool_name}",
-                "tools_used": tools_used,
-                "results": results,
-                "partial_failure": partial_failure,
-            }
+            return _failure_result(
+                error_type="tool_not_found",
+                message=f"Tool no registrada: {tool_name}",
+                tools_used=tools_used,
+                results=results,
+                partial_failure=partial_failure,
+                trace_id=trace_id,
+            )
 
-        result = tool_fn(**arguments)
+        try:
+            result = tool_fn(**arguments)
+        except Exception:
+            partial_failure = bool(tools_used)
+            logger.exception(
+                "tool_execution_failed trace_id=%s tool=%s model=%s",
+                trace_id,
+                tool_name,
+                arguments.get("model"),
+            )
+            return _failure_result(
+                error_type="tool_exception",
+                message=f"No pude ejecutar {tool_name}. Trace ID: {trace_id}" if trace_id else f"No pude ejecutar {tool_name}.",
+                tools_used=tools_used,
+                results=results,
+                partial_failure=partial_failure,
+                trace_id=trace_id,
+            )
         tools_used.append(tool_name)
-        results.append({"tool": tool_name, "args": arguments, "result": result})
+        results.append({"tool": tool_name, "args": _public_arguments(arguments), "result": result})
         previous_result = result
 
         if isinstance(result, dict) and result.get("error"):
             partial_failure = True
-            return {
-                "success": False,
-                "error_type": result.get("error"),
-                "message": f"Error ejecutando {tool_name}: {result.get('error')}",
-                "tools_used": tools_used,
-                "results": results,
-                "partial_failure": partial_failure,
-            }
+            return _failure_result(
+                error_type=str(result.get("error")),
+                message=f"Error ejecutando {tool_name}: {result.get('error')}",
+                tools_used=tools_used,
+                results=results,
+                partial_failure=partial_failure,
+                trace_id=trace_id,
+            )
 
         if tool_name == "query_odoo_search" and isinstance(result, list) and not result:
-            return {
-                "success": False,
-                "error_type": "entity_not_found",
-                "message": _entity_not_found_message(entity, arguments),
-                "tools_used": tools_used,
-                "results": results,
-                "partial_failure": partial_failure,
-            }
+            return _failure_result(
+                error_type="entity_not_found",
+                message=_entity_not_found_message(entity, arguments),
+                tools_used=tools_used,
+                results=results,
+                partial_failure=partial_failure,
+                trace_id=trace_id,
+            )
 
-    return {
+    payload: ToolExecutionResult = {
         "success": True,
         "tools_used": tools_used,
         "results": results,
         "partial_failure": partial_failure,
     }
+    if trace_id:
+        payload["trace_id"] = trace_id
+    return payload
