@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+from app.agents.types import Entity
+
 
 PURCHASE_ORDER_RE = re.compile(r"\bpo(?:[-a-z0-9]*\d[-a-z0-9]*)\b", re.I)
 SALE_ORDER_RE = re.compile(r"\bso(?:[-a-z0-9]*\d[-a-z0-9]*)\b", re.I)
@@ -35,7 +37,7 @@ def _domain_to_model(domain: str | None) -> str | None:
     return None
 
 
-def resolve_entity(text: str) -> dict | None:
+def resolve_entity(text: str) -> Entity | None:
     value = text or ""
     purchase_match = PURCHASE_ORDER_RE.search(value)
     if purchase_match:

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import Any
+
+from app.agents.types import AgentContext, Entity, ToolArguments, ToolExecutionResult, ToolStep
 from app.tools.knowledge_tools import run_search_knowledge
 from app.tools.odoo_tools import query_odoo_count, query_odoo_group, query_odoo_read, query_odoo_search
 
@@ -25,7 +28,7 @@ MODEL_ENTITY_LABELS = {
 }
 
 
-def _entity_not_found_message(entity: dict | None, arguments: dict | None = None) -> str:
+def _entity_not_found_message(entity: Entity | None, arguments: ToolArguments | None = None) -> str:
     model = None
     if isinstance(entity, dict):
         model = entity.get("model")
@@ -36,7 +39,7 @@ def _entity_not_found_message(entity: dict | None, arguments: dict | None = None
     return f"No encontré {label} {code}." if code else f"No encontré {label}."
 
 
-def _resolve_dynamic_args(arguments: dict, previous_result):
+def _resolve_dynamic_args(arguments: ToolArguments, previous_result: Any) -> ToolArguments:
     resolved = dict(arguments or {})
     if resolved.get("ids") == "$previous_result":
         if isinstance(previous_result, list) and previous_result and all(isinstance(item, int) for item in previous_result):
@@ -49,17 +52,17 @@ def _resolve_dynamic_args(arguments: dict, previous_result):
     return resolved
 
 
-def _attach_runtime_context(tool_name: str | None, arguments: dict, context: dict | None) -> dict:
+def _attach_runtime_context(tool_name: str | None, arguments: ToolArguments, context: AgentContext | dict | None) -> ToolArguments:
     resolved = dict(arguments or {})
     if tool_name and tool_name.startswith(ODOO_TOOL_PREFIX) and isinstance(context, dict):
         resolved.setdefault("context", context)
     return resolved
 
 
-def execute_plan(plan: list[dict], entity: dict | None = None, context: dict | None = None) -> dict:
+def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: AgentContext | dict | None = None) -> ToolExecutionResult:
     tools_used: list[str] = []
     results: list[dict] = []
-    previous_result = None
+    previous_result: Any = None
     partial_failure = False
 
     for step in plan:

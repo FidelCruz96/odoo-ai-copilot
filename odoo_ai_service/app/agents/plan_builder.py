@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.agents.route_selector import CLARIFICATION, ERP_DATA, FALLBACK, KNOWLEDGE, MIXED
+from app.agents.types import Entity, ToolStep
 
 
 def _canonical_policy_query(domain: str | None) -> str:
@@ -15,11 +16,11 @@ def _canonical_policy_query(domain: str | None) -> str:
     return "politica proceso documentacion"
 
 
-def has_odoo_tool(plan: list[dict]) -> bool:
+def has_odoo_tool(plan: list[ToolStep]) -> bool:
     return any(step.get("tool", "").startswith("query_odoo_") for step in plan)
 
 
-def has_knowledge_tool(plan: list[dict]) -> bool:
+def has_knowledge_tool(plan: list[ToolStep]) -> bool:
     return any(step.get("tool") == "search_knowledge" for step in plan)
 
 
@@ -49,8 +50,8 @@ def _default_domain_for_domain(domain: str | None) -> list:
     return []
 
 
-def build_plan(route: str, domain: str | None, intent: str | None, entity: dict | None) -> list[dict]:
-    plan: list[dict] = []
+def build_plan(route: str, domain: str | None, intent: str | None, entity: Entity | None) -> list[ToolStep]:
+    plan: list[ToolStep] = []
     model = entity.get("model") if isinstance(entity, dict) else None
     domain_model = model or _main_model_for_domain(domain)
 

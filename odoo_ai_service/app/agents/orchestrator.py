@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from time import perf_counter
 from uuid import uuid4
 
@@ -21,6 +22,7 @@ from app.agents.response_composer import (
 )
 from app.agents.route_selector import CLARIFICATION, ERP_DATA, FALLBACK, KNOWLEDGE, MIXED, select_route
 from app.agents.tool_executor import execute_plan
+from app.agents.types import AgentContext, AgentMetrics, AgentResponse, Entity, KnowledgeResult, ToolExecutionResult
 from app.memory.memory_store import load_memory, persist_memory
 from app.memory.schemas import ActiveEntity, ConversationMemory
 
@@ -37,7 +39,7 @@ def _build_metrics(
     active_model: str | None,
     active_id: int | None,
     memory_updated: bool,
-) -> dict:
+) -> AgentMetrics:
     return {
         "route_selected": route,
         "intent_detected": intent,
@@ -52,7 +54,7 @@ def _build_metrics(
     }
 
 
-def _extract_primary_record(execution_result: dict) -> dict | None:
+def _extract_primary_record(execution_result: ToolExecutionResult) -> dict[str, Any] | None:
     results = execution_result.get("results") or []
     for row in results:
         result = row.get("result")
@@ -61,7 +63,7 @@ def _extract_primary_record(execution_result: dict) -> dict | None:
     return None
 
 
-def _extract_search_ids(execution_result: dict) -> list[int]:
+def _extract_search_ids(execution_result: ToolExecutionResult) -> list[int]:
     results = execution_result.get("results") or []
     for row in results:
         result = row.get("result")
@@ -70,7 +72,7 @@ def _extract_search_ids(execution_result: dict) -> list[int]:
     return []
 
 
-def _extract_knowledge_result(execution_result: dict) -> dict | None:
+def _extract_knowledge_result(execution_result: ToolExecutionResult) -> KnowledgeResult | None:
     results = execution_result.get("results") or []
     for row in results:
         if row.get("tool") == "search_knowledge" and isinstance(row.get("result"), dict):
@@ -78,7 +80,7 @@ def _extract_knowledge_result(execution_result: dict) -> dict | None:
     return None
 
 
-def _extract_first_tool_result(execution_result: dict):
+def _extract_first_tool_result(execution_result: ToolExecutionResult) -> Any:
     results = execution_result.get("results") or []
     for row in results:
         if "result" in row:
@@ -86,7 +88,7 @@ def _extract_first_tool_result(execution_result: dict):
     return None
 
 
-def _resolve_active_model(primary_record: dict | None, plan_entity: dict | None, domain: str | None) -> str | None:
+def _resolve_active_model(primary_record: dict[str, Any] | None, plan_entity: Entity | None, domain: str | None) -> str | None:
     if isinstance(primary_record, dict) and isinstance(primary_record.get("model"), str):
         return primary_record.get("model")
     if isinstance(plan_entity, dict) and isinstance(plan_entity.get("model"), str):
@@ -96,7 +98,7 @@ def _resolve_active_model(primary_record: dict | None, plan_entity: dict | None,
     return None
 
 
-def _fallback_response(question: str, context: dict | None, history: list | None) -> dict:
+def _fallback_response(question: str, context: AgentContext | dict | None, history: list | None) -> dict:
     return ask_agent(question, context=context, history=history)
 
 
@@ -119,10 +121,10 @@ def _memory_from_success(
     intent: str | None,
     domain: str | None,
     tools_used: list[str],
-    record: dict | None,
-    entity: dict | None,
-    knowledge_result: dict | None,
-) -> tuple[dict, bool]:
+    record: dict[str, Any] | None,
+    entity: Entity | None,
+    knowledge_result: KnowledgeResult | None,
+) -> tuple[dict[str, Any], bool]:
     base = existing_memory or ConversationMemory(session_id=session_id)
     memory_updated = False
 
@@ -155,11 +157,11 @@ def _memory_from_success(
 def ask_hybrid_agent(
     question: str,
     session_id: str | None = None,
-    context: dict | None = None,
+    context: AgentContext | dict | None = None,
     history: list | None = None,
-) -> dict:
+) -> AgentResponse:
     started_at = perf_counter()
-    base_context = dict(context or {})
+    base_context = cast(AgentContext, dict(context or {}))
     trace_id = base_context.get("request_id") or str(uuid4())
     base_context["request_id"] = trace_id
     resolved_session_id = session_id or trace_id
