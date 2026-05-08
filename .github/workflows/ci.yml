@@ -33,6 +33,11 @@ jobs:
       - name: Show Python version
         run: python --version
 
+      - name: Install AI service dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r odoo_ai_service/requirements.txt
+
       - name: Compile Python files
         run: python -m compileall -q odoo_ai_service custom_addons/odoo_ai_assistant
 
