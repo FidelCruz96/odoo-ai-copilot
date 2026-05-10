@@ -9,7 +9,7 @@ INTENT_MAP = {
     "ranking": ["top", "mayores", "mas alto", "mayor", "ranking"],
     "line_items": ["productos", "lineas", "items", "detalle"],
     "policy_validation": ["debio", "deberia", "aprobarse", "cumple", "segun la politica"],
-    "explanation": ["que es", "como funciona", "explica"],
+    "explanation": ["que es", "como funciona", "explica", "documentacion", "manual", "politica", "proceso"],
 }
 
 
@@ -20,6 +20,9 @@ def resolve_intent(text: str, domain: str | None = None, entity: Entity | None =
         return "policy_validation"
 
     if any(keyword in value for keyword in INTENT_MAP["explanation"]):
+        return "explanation"
+
+    if "segun" in value and domain in {"knowledge", "purchase", "sale", "invoice", "inventory"}:
         return "explanation"
 
     amount_hint = any(keyword in value for keyword in INTENT_MAP["amount_lookup"])

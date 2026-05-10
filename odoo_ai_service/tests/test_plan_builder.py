@@ -29,6 +29,17 @@ class TestPlanBuilder(unittest.TestCase):
         self.assertEqual(plan[0]["tool"], "query_odoo_count")
         self.assertEqual(plan[0]["args"]["model"], "sale.order")
 
+    def test_status_lookup_with_code_uses_search_then_read(self):
+        plan = build_plan(
+            route="erp_data",
+            domain="sale",
+            intent="status_lookup",
+            entity={"type": "sale_order", "code": "DCN 0426-0039", "model": "sale.order", "lookup_field": "name"},
+        )
+
+        self.assertEqual([step["tool"] for step in plan], ["query_odoo_search", "query_odoo_read"])
+        self.assertEqual(plan[1]["args"]["fields"], ["name", "state"])
+
     def test_invoice_ranking_plan(self):
         plan = build_plan(route="erp_data", domain="invoice", intent="ranking", entity=None)
         self.assertEqual(plan[0]["tool"], "query_odoo_group")

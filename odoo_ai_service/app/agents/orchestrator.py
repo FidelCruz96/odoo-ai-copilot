@@ -19,6 +19,7 @@ from app.agents.response_composer import (
     compose_policy_validation,
     compose_ranking_result,
     compose_response,
+    compose_status_lookup,
 )
 from app.agents.route_selector import CLARIFICATION, ERP_DATA, FALLBACK, KNOWLEDGE, MIXED, select_route
 from app.agents.tool_executor import execute_plan
@@ -353,6 +354,10 @@ def ask_hybrid_agent(
         response_faithful = False
     elif route == ERP_DATA and intent == "amount_lookup" and primary_record:
         answer = compose_amount_lookup(primary_record, domain=domain)
+        grounded = True
+        response_faithful = True
+    elif route == ERP_DATA and intent == "status_lookup" and primary_record:
+        answer = compose_status_lookup(primary_record, domain=domain)
         grounded = True
         response_faithful = True
     elif route == ERP_DATA and intent == "count":

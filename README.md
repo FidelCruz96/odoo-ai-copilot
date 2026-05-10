@@ -443,6 +443,29 @@ docker exec ai_service_test python evals/run_eval.py \
   --report evals/reports/latest-real.json
 ```
 
+Flujo reproducible recomendado:
+
+```bash
+make eval-real
+```
+
+Este comando:
+
+- Levanta `db`, `web`, `db_knowledge` y `ai_service` con `docker-compose.knowledge.yaml`.
+- Reconstruye `ai_service_test` si hay cambios.
+- Instala/actualiza el módulo demo `odoo_ai_eval_demo`.
+- Ingresa los documentos RAG de compras, inventario y ventas.
+- Ejecuta `evals/run_eval.py` contra `/v1/ask`.
+- Copia el reporte a `odoo_ai_service/evals/reports/latest-real.json`.
+
+Variables útiles:
+
+```bash
+PG_VERSION=15 make eval-real
+EVAL_ODOO_DB=admin make eval-real
+EVAL_REPORT_PATH=evals/reports/my-run.json make eval-real
+```
+
 ## CI/CD
 
 El repo incluye GitHub Actions en `.github/workflows/ci.yml`.
@@ -455,6 +478,25 @@ El pipeline actual ejecuta:
 - Validación de Docker Compose base.
 - Validación de Docker Compose con Knowledge/RAG.
 - Build Docker del AI Service.
+
+Eval real manual:
+
+```text
+.github/workflows/eval-real.yml
+```
+
+Este workflow se ejecuta con `workflow_dispatch` porque levanta Odoo, pgvector, AI Service y llama al proveedor LLM real. Requiere configurar estos secrets en GitHub:
+
+- `OPENAI_API_KEY`
+- `ODOO_AI_TOKEN`
+
+El workflow ejecuta:
+
+```bash
+make eval-real
+```
+
+Y publica el JSON de resultados como artifact `real-eval-report`.
 
 CD real todavía requiere definir:
 

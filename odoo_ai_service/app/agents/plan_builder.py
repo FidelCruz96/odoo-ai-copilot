@@ -103,6 +103,27 @@ def build_plan(route: str, domain: str | None, intent: str | None, entity: Entit
                     },
                 }
             )
+        elif isinstance(entity, dict) and entity.get("code") and model:
+            plan.extend(
+                [
+                    {
+                        "tool": "query_odoo_search",
+                        "args": {
+                            "model": model,
+                            "domain": [[entity.get("lookup_field", "name"), "=", entity["code"]]],
+                            "limit": 1,
+                        },
+                    },
+                    {
+                        "tool": "query_odoo_read",
+                        "args": {
+                            "model": model,
+                            "ids": "$previous_result",
+                            "fields": ["name", "state"],
+                        },
+                    },
+                ]
+            )
     elif route == ERP_DATA and intent == "count" and domain_model:
         plan.append(
             {

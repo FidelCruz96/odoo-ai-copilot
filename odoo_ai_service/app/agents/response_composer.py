@@ -69,6 +69,17 @@ def compose_count_result(count, domain: str | None = None) -> str:
     return f"Encontré {value} {labels.get(domain, 'registros')} en Odoo."
 
 
+def compose_status_lookup(record: dict, domain: str | None = None) -> str:
+    labels = {
+        "purchase": "La compra",
+        "sale": "La venta",
+        "invoice": "La factura",
+        "inventory": "El picking",
+    }
+    state = record.get("state") or "sin estado"
+    return f"{labels.get(domain, 'El registro')} {record.get('name')} está en estado {state}."
+
+
 def compose_ranking_result(rows: list, domain: str | None = None) -> str:
     if not isinstance(rows, list) or not rows:
         return "No encontré registros para construir el ranking."

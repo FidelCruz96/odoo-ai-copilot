@@ -1,0 +1,20 @@
+{
+    "name": "Odoo AI Eval Demo Data",
+    "version": "18.0.1.0.0",
+    "category": "Tools",
+    "summary": "Deterministic demo fixtures for Odoo AI Copilot evals",
+    "author": "Fidel Cruz",
+    "depends": [
+        "odoo_ai_assistant",
+        "sale",
+        "purchase",
+        "account",
+        "stock",
+    ],
+    "data": [],
+    "installable": True,
+    "application": False,
+    "auto_install": False,
+    "post_init_hook": "post_init_hook",
+    "license": "LGPL-3",
+}

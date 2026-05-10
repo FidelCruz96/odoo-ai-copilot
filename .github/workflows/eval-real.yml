@@ -1,0 +1,86 @@
+name: Real Eval
+
+on:
+  workflow_dispatch:
+    inputs:
+      eval_retries:
+        description: "Number of eval attempts to tolerate transient LLM latency"
+        required: false
+        default: "2"
+      report_path:
+        description: "Report path inside odoo_ai_service"
+        required: false
+        default: "evals/reports/latest-real.json"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: real-eval-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  real-eval:
+    name: Odoo + RAG real eval
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PG_VERSION: "15"
+      PG_USER: odoo
+      PG_PASSWORD: odoo
+      PG_PORT: "5432"
+      PG_CONTAINER_NAME: odoo18_db_test
+      ODOO_VERSION: "18.0"
+      ODOO_CONTAINER_NAME: odoo18_web_test
+      ODOO_PORT: "8069"
+      ODOO_DB: admin
+      ODOO_BASE_URL: http://web:8069
+      ODOO_URL: http://web:8069
+      ODOO_AI_TOKEN: ${{ secrets.ODOO_AI_TOKEN }}
+      AI_SERVICE_API_KEY: ${{ secrets.ODOO_AI_TOKEN }}
+      AI_SERVICE_AUTH_REQUIRED: "true"
+      AI_SERVICE_CONTAINER_NAME: ai_service_test
+      AI_SERVICE_PORT: "8001"
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      AI_MODEL: gpt-4o-mini
+      EMBEDDING_MODEL: text-embedding-3-large
+      KNOWLEDGE_DB_CONTAINER_NAME: ai_knowledge_db_test
+      KNOWLEDGE_DB_PORT: "5434"
+      TOP_K: "5"
+      SIMILARITY_THRESHOLD: "0.70"
+      MAX_UPLOAD_SIZE_MB: "10"
+      ODOO_SERVER: ./odoo
+      ODOO_DATA: ./odoo_data
+      CUSTOM_ADDONS: ./custom_addons
+      ENTERPRISE_ADDONS: ./enterprise
+      EVAL_RETRIES: ${{ inputs.eval_retries }}
+      EVAL_REPORT_PATH: ${{ inputs.report_path }}
+      ODOO_BIN: /opt/odoo/odoo/odoo-bin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        run: |
+          test -n "$OPENAI_API_KEY"
+          test -n "$ODOO_AI_TOKEN"
+
+      - name: Prepare local bind mount directories
+        run: |
+          mkdir -p odoo odoo_data enterprise
+
+      - name: Build Odoo test image
+        run: docker build -t "dockerodoo:${ODOO_VERSION}" .
+
+      - name: Run real eval
+        run: make eval-real
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-eval-report
+          path: odoo_ai_service/evals/reports/*.json
+          if-no-files-found: ignore

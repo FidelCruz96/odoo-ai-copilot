@@ -14,6 +14,12 @@ class TestIntentResolver(unittest.TestCase):
     def test_policy_validation(self):
         self.assertEqual(resolve_intent("debio aprobarse esta compra segun la politica"), "policy_validation")
 
+    def test_documentation_guidance_is_explanation(self):
+        self.assertEqual(
+            resolve_intent("segun la documentacion como debo aprobar compras", domain="purchase"),
+            "explanation",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
