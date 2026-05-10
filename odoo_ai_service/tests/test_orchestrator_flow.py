@@ -47,6 +47,17 @@ if "psycopg2" not in sys.modules:
 from app.agents.orchestrator import ask_hybrid_agent
 
 
+PURCHASE_MEMORY = {
+    "active_entity": {
+        "type": "purchase_order",
+        "model": "purchase.order",
+        "id": 113,
+        "name": "PO-I-10-00026",
+        "confidence": 1.0,
+    }
+}
+
+
 class TestOrchestratorFlow(unittest.TestCase):
     def _tool_side_effect(self, **kwargs):
         raise AssertionError("Unexpected direct call")
@@ -226,6 +237,112 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(second["route_selected"], "clarification")
         self.assertTrue(second["needs_clarification"])
         self.assertFalse(second["memory_hit"])
+
+    def test_memory_does_not_contaminate_sale_count(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_count"],
+            "results": [
+                {"tool": "query_odoo_count", "args": {"model": "sale.order"}, "result": 24},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("cuantas ventas hay", session_id="flow-memory-count", context={"memory": PURCHASE_MEMORY}, history=[])
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertEqual(result["domain_detected"], "sale")
+        self.assertEqual(result["intent_detected"], "count")
+        self.assertFalse(result["memory_hit"])
+        self.assertEqual(execute_plan.call_args.args[0][0]["args"]["model"], "sale.order")
+
+    def test_memory_does_not_contaminate_invoice_ranking(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_group"],
+            "results": [
+                {"tool": "query_odoo_group", "args": {"model": "account.move"}, "result": [{"partner_id": [1, "Cliente A"], "amount_total": 100.0}]},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("top clientes por facturacion", session_id="flow-memory-rank", context={"memory": PURCHASE_MEMORY}, history=[])
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertEqual(result["domain_detected"], "invoice")
+        self.assertEqual(result["intent_detected"], "ranking")
+        self.assertFalse(result["memory_hit"])
+        self.assertEqual(execute_plan.call_args.args[0][0]["args"]["model"], "account.move")
+
+    def test_amount_total_uses_memory_when_contextual(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_read"],
+            "results": [
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 113, "name": "PO-I-10-00026", "amount_total": 122100.0, "currency_id": [155, "PEN"], "state": "purchase"}]},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("cuanto es el total", session_id="flow-memory-amount", context={"memory": PURCHASE_MEMORY}, history=[])
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertTrue(result["memory_hit"])
+        self.assertEqual(result["active_model"], "purchase.order")
+        self.assertEqual(execute_plan.call_args.args[0][0]["tool"], "query_odoo_read")
+
+    def test_relative_policy_uses_memory_for_mixed_route(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_read", "search_knowledge"],
+            "results": [
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 113, "name": "PO-I-10-00026", "amount_total": 122100.0, "currency_id": [155, "PEN"], "state": "purchase"}]},
+                {"tool": "search_knowledge", "args": {"query": "esta compra requiere aprobacion politica aprobacion compras monto umbral orden de compra"}, "result": {"answer": "Requiere aprobación.", "sources": [{"doc_name": "purchase_approvals.md", "score": 0.9}], "tokens_used": 20}},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent("esta compra requiere aprobacion?", session_id="flow-memory-policy", context={"memory": PURCHASE_MEMORY}, history=[])
+
+        self.assertEqual(result["route_selected"], "mixed")
+        self.assertEqual(result["intent_detected"], "policy_validation")
+        self.assertTrue(result["memory_hit"])
+        self.assertEqual(result["tools_used"], ["query_odoo_read", "search_knowledge"])
+        self.assertTrue(result["sources"])
+        self.assertEqual([step["tool"] for step in execute_plan.call_args.args[0]], ["query_odoo_read", "search_knowledge"])
+
+    def test_relative_policy_without_memory_asks_for_clarification(self):
+        with patch("app.agents.orchestrator.execute_plan") as execute_plan:
+            result = ask_hybrid_agent("esta compra requiere aprobacion?", session_id="flow-no-memory-policy", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertTrue(result["needs_clarification"])
+        execute_plan.assert_not_called()
+
+    def test_odoo_evidence_uses_real_result_sample(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_search", "query_odoo_read"],
+            "results": [
+                {"tool": "query_odoo_search", "args": {"model": "purchase.order"}, "result": [113]},
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{
+                    "id": 113,
+                    "name": "PO-I-10-00026",
+                    "amount_total": 122100.0,
+                    "state": "purchase",
+                    "token": "hidden",
+                    "secret": "hidden",
+                    "password": "hidden",
+                }]},
+            ],
+            "partial_failure": False,
+        }):
+            result = ask_hybrid_agent("¿Cuánto de monto tiene PO-I-10-00026?", session_id="flow-evidence", context={"memory": {}}, history=[])
+
+        evidence = result["odoo_evidence"][0]["result_sample"][0]
+        self.assertEqual(evidence["id"], 113)
+        self.assertEqual(evidence["name"], "PO-I-10-00026")
+        self.assertEqual(evidence["amount_total"], 122100.0)
+        self.assertEqual(evidence["state"], "purchase")
+        self.assertNotIn("password", evidence)
+        self.assertNotIn("token", evidence)
+        self.assertNotIn("secret", evidence)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,13 @@ def _canonical_policy_query(domain: str | None) -> str:
     return "politica proceso documentacion"
 
 
+def _contextual_knowledge_query(question: str | None, domain: str | None) -> str:
+    canonical = _canonical_policy_query(domain) if domain else "documentacion odoo"
+    if question:
+        return f"{question} {canonical}".strip()
+    return canonical
+
+
 def has_odoo_tool(plan: list[ToolStep]) -> bool:
     return any(step.get("tool", "").startswith("query_odoo_") for step in plan)
 
@@ -50,10 +57,19 @@ def _default_domain_for_domain(domain: str | None) -> list:
     return []
 
 
-def build_plan(route: str, domain: str | None, intent: str | None, entity: Entity | None) -> list[ToolStep]:
+def build_plan(
+    route: str,
+    domain: str | None,
+    intent: str | None,
+    entity: Entity | None,
+    question: str | None = None,
+) -> list[ToolStep]:
     plan: list[ToolStep] = []
     model = entity.get("model") if isinstance(entity, dict) else None
-    domain_model = model or _main_model_for_domain(domain)
+    if intent in {"count", "ranking"}:
+        domain_model = _main_model_for_domain(domain)
+    else:
+        domain_model = model or _main_model_for_domain(domain)
 
     if route == CLARIFICATION:
         return []
@@ -186,7 +202,7 @@ def build_plan(route: str, domain: str | None, intent: str | None, entity: Entit
             {
                 "tool": "search_knowledge",
                 "args": {
-                    "query": _canonical_policy_query(domain),
+                    "query": f"{question or ''} {_canonical_policy_query(domain)}".strip(),
                     "filters": {"module": domain},
                     "top_k": 5,
                 },
@@ -197,7 +213,7 @@ def build_plan(route: str, domain: str | None, intent: str | None, entity: Entit
             {
                 "tool": "search_knowledge",
                 "args": {
-                    "query": _canonical_policy_query(domain) if domain else "documentacion odoo",
+                    "query": _contextual_knowledge_query(question, domain),
                     "filters": {"module": domain} if domain and domain != "knowledge" else {},
                     "top_k": 5,
                 },

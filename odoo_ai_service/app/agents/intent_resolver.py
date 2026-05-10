@@ -2,13 +2,30 @@ from __future__ import annotations
 
 from app.agents.types import Entity, IntentName
 
+POLICY_VALIDATION_KEYWORDS = [
+    "debio",
+    "deberia",
+    "aprobarse",
+    "cumple",
+    "segun la politica",
+    "segun documentacion",
+    "requiere aprobacion",
+    "necesita aprobacion",
+    "debe aprobarse",
+    "entra al flujo",
+    "aplica aprobacion",
+    "supera el umbral",
+    "corresponde aprobar",
+    "esta bien segun",
+]
+
 INTENT_MAP = {
     "amount_lookup": ["monto", "total", "importe", "valor"],
     "status_lookup": ["estado", "situacion"],
     "count": ["cuantos", "cuantas", "cantidad", "numero de", "numero ", "nro "],
     "ranking": ["top", "mayores", "mas alto", "mayor", "ranking"],
     "line_items": ["productos", "lineas", "items", "detalle"],
-    "policy_validation": ["debio", "deberia", "aprobarse", "cumple", "segun la politica"],
+    "policy_validation": POLICY_VALIDATION_KEYWORDS,
     "explanation": ["que es", "como funciona", "explica", "documentacion", "manual", "politica", "proceso"],
 }
 
@@ -17,6 +34,9 @@ def resolve_intent(text: str, domain: str | None = None, entity: Entity | None =
     value = text or ""
 
     if any(keyword in value for keyword in INTENT_MAP["policy_validation"]):
+        return "policy_validation"
+
+    if entity and "segun" in value and domain in {"purchase", "sale", "invoice", "inventory"}:
         return "policy_validation"
 
     if any(keyword in value for keyword in INTENT_MAP["explanation"]):

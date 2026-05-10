@@ -115,6 +115,7 @@ class OdooEvidence(TypedDict, total=False):
     domain: list[Any] | None
     fields: list[str] | None
     result: str
+    result_sample: Any
 
 
 class AgentMetrics(TypedDict):

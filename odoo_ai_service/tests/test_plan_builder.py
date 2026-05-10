@@ -29,6 +29,26 @@ class TestPlanBuilder(unittest.TestCase):
         self.assertEqual(plan[0]["tool"], "query_odoo_count")
         self.assertEqual(plan[0]["args"]["model"], "sale.order")
 
+    def test_count_ignores_active_entity_model(self):
+        plan = build_plan(
+            route="erp_data",
+            domain="sale",
+            intent="count",
+            entity={"type": "purchase_order", "model": "purchase.order", "id": 113},
+        )
+
+        self.assertEqual(plan[0]["args"]["model"], "sale.order")
+
+    def test_ranking_ignores_active_entity_model(self):
+        plan = build_plan(
+            route="erp_data",
+            domain="invoice",
+            intent="ranking",
+            entity={"type": "purchase_order", "model": "purchase.order", "id": 113},
+        )
+
+        self.assertEqual(plan[0]["args"]["model"], "account.move")
+
     def test_status_lookup_with_code_uses_search_then_read(self):
         plan = build_plan(
             route="erp_data",
@@ -45,6 +65,30 @@ class TestPlanBuilder(unittest.TestCase):
         self.assertEqual(plan[0]["tool"], "query_odoo_group")
         self.assertEqual(plan[0]["args"]["model"], "account.move")
         self.assertEqual(plan[0]["args"]["groupby"], ["partner_id"])
+
+    def test_knowledge_uses_original_question(self):
+        plan = build_plan(
+            route="knowledge",
+            domain="purchase",
+            intent="explanation",
+            entity=None,
+            question="como funciona la politica de aprobacion de compras",
+        )
+
+        self.assertIn("como funciona la politica de aprobacion de compras", plan[0]["args"]["query"])
+        self.assertIn("politica aprobacion compras", plan[0]["args"]["query"])
+
+    def test_mixed_query_combines_question_and_canonical_terms(self):
+        plan = build_plan(
+            route="mixed",
+            domain="purchase",
+            intent="policy_validation",
+            entity={"type": "purchase_order", "model": "purchase.order", "id": 113},
+            question="cumple po-i-10-00026 segun la politica",
+        )
+
+        self.assertIn("cumple po-i-10-00026 segun la politica", plan[1]["args"]["query"])
+        self.assertIn("politica aprobacion compras", plan[1]["args"]["query"])
 
 
 if __name__ == "__main__":

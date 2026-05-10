@@ -99,6 +99,23 @@ def _resolve_active_model(primary_record: dict[str, Any] | None, plan_entity: En
     return None
 
 
+def _safe_result_sample(result: Any) -> Any:
+    sensitive_keys = {"password", "token", "secret"}
+    if isinstance(result, list):
+        return [_safe_result_sample(item) for item in result[:3]]
+    if isinstance(result, dict):
+        return {
+            key: _safe_result_sample(value)
+            for key, value in result.items()
+            if str(key).lower() not in sensitive_keys
+        }
+    return result
+
+
+def _is_evidence_result(result: Any) -> bool:
+    return not (isinstance(result, list) and all(isinstance(item, int) for item in result))
+
+
 def _fallback_response(question: str, context: AgentContext | dict | None, history: list | None) -> dict:
     return ask_agent(question, context=context, history=history)
 
@@ -181,7 +198,13 @@ def ask_hybrid_agent(
         domain = "knowledge"
 
     memory = load_memory(resolved_session_id, base_context)
-    context_resolution = resolve_context(entity, memory)
+    context_resolution = resolve_context(
+        entity,
+        memory,
+        intent=intent,
+        domain=domain,
+        question=normalized_question,
+    )
     active_entity = context_resolution.get("entity")
 
     if domain is None and isinstance(active_entity, dict):
@@ -252,7 +275,7 @@ def ask_hybrid_agent(
 
     plan_entity = active_entity or entity
     try:
-        plan = build_plan(route, domain, intent, plan_entity)
+        plan = build_plan(route, domain, intent, plan_entity, question=normalized_question)
     except RuntimeError as exc:
         latency_ms = round((perf_counter() - started_at) * 1000, 2)
         active_model = active_entity.get("model") if isinstance(active_entity, dict) else None
@@ -401,10 +424,10 @@ def ask_hybrid_agent(
             "model": (row.get("args") or {}).get("model"),
             "domain": (row.get("args") or {}).get("domain"),
             "fields": (row.get("args") or {}).get("fields"),
-            "result": answer[:400],
+            "result_sample": _safe_result_sample(row.get("result")),
         }
         for row in (execution_result.get("results") or [])
-        if str(row.get("tool", "")).startswith("query_odoo_")
+        if str(row.get("tool", "")).startswith("query_odoo_") and _is_evidence_result(row.get("result"))
     ]
     active_model = _resolve_active_model(primary_record, plan_entity, domain)
     active_id = primary_record.get("id") if isinstance(primary_record, dict) else None

@@ -466,6 +466,23 @@ EVAL_ODOO_DB=admin make eval-real
 EVAL_REPORT_PATH=evals/reports/my-run.json make eval-real
 ```
 
+Reporte de evaluación real de muestra:
+
+```text
+odoo_ai_service/evals/reports/sample-real-demo-admin.json
+```
+
+### Context Hardening
+
+El orquestador endurece el uso de memoria conversacional para evitar contaminación entre dominios:
+
+- `count` y `ranking` ignoran la entidad activa y usan el modelo del dominio detectado.
+- La memoria solo se usa en intents que necesitan contexto: `amount_lookup`, `status_lookup`, `line_items` y `policy_validation`.
+- Preguntas explícitas como `cuantas ventas hay` no heredan una compra activa.
+- Preguntas contextuales como `cuanto es el total`, `cual es su estado` o `esta compra requiere aprobacion` sí pueden usar la entidad activa.
+- Las rutas `knowledge` y `mixed` pasan la pregunta normalizada a `search_knowledge` para mejorar retrieval.
+- `odoo_evidence` expone una muestra real y sanitizada del resultado de la tool en `result_sample`.
+
 ## CI/CD
 
 El repo incluye GitHub Actions en `.github/workflows/ci.yml`.
