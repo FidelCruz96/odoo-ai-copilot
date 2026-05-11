@@ -418,6 +418,19 @@ El proyecto usa `.env` en la raíz y `config/odoo.conf`.
 - `LLM_TOKEN_CHAR_RATIO`
 - `LLM_LOG_TOKEN_USAGE`
 
+### Variables de memoria conversacional
+
+- `MEMORY_STORE`: `in_memory` por defecto; `postgres` para persistencia.
+- `MEMORY_TTL_SECONDS`: TTL de la memoria, por defecto `86400`.
+- `MEMORY_DATABASE_URL`: conexión PostgreSQL cuando `MEMORY_STORE=postgres`.
+
+La memoria se guarda por `db_name + user_id + session_id` para evitar cruces entre usuarios, sesiones o bases de datos.
+
+### Variables de evaluación
+
+- `EVAL_ENFORCE_LATENCY`: si es `true`, los casos que superen `max_latency_ms` fallan. Por defecto la latencia se reporta como warning para evitar flakiness del proveedor LLM/RAG.
+- `AI_EVAL_DB_NAME` / `EVAL_ODOO_DB`: nombre de base usado para aislar memoria en evals reales.
+
 ---
 
 ## Guía rápida de uso

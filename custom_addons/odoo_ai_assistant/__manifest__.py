@@ -5,6 +5,7 @@
     "summary": "AI Assistant for Odoo",
     "author": "Fidel Cruz",
     "website": "",
+    "license": "LGPL-3",
     "depends": ['base', 'web', 'account', 'purchase', 'stock', 'sale'],
     "data": [
         "security/ir.model.access.csv",

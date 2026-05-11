@@ -45,6 +45,7 @@ if "psycopg2" not in sys.modules:
     sys.modules["psycopg2.extras"] = psycopg2_extras_stub
 
 from app.agents.orchestrator import ask_hybrid_agent
+from app.memory.memory_store import reset_store_for_tests
 
 
 PURCHASE_MEMORY = {
@@ -59,6 +60,9 @@ PURCHASE_MEMORY = {
 
 
 class TestOrchestratorFlow(unittest.TestCase):
+    def setUp(self):
+        reset_store_for_tests()
+
     def _tool_side_effect(self, **kwargs):
         raise AssertionError("Unexpected direct call")
 
@@ -306,6 +310,65 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(result["tools_used"], ["query_odoo_read", "search_knowledge"])
         self.assertTrue(result["sources"])
         self.assertEqual([step["tool"] for step in execute_plan.call_args.args[0]], ["query_odoo_read", "search_knowledge"])
+
+    def test_relative_policy_uses_persisted_memory_when_request_memory_is_empty(self):
+        scoped_context = {"security": {"uid": 7, "db_name": "odoo_demo"}, "memory": {}}
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_search", "query_odoo_read"],
+            "results": [
+                {"tool": "query_odoo_search", "args": {"model": "purchase.order"}, "result": [113]},
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 113, "name": "PO-I-10-00026", "amount_total": 122100.0, "currency_id": [155, "PEN"], "state": "purchase"}]},
+            ],
+            "partial_failure": False,
+        }):
+            first = ask_hybrid_agent("¿Cuánto de monto tiene PO-I-10-00026?", session_id="flow-persisted-memory", context=scoped_context, history=[])
+
+        self.assertTrue(first["memory_updated"])
+
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_read", "search_knowledge"],
+            "results": [
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 113, "name": "PO-I-10-00026", "amount_total": 122100.0, "currency_id": [155, "PEN"], "state": "purchase"}]},
+                {"tool": "search_knowledge", "args": {"query": "esta compra requiere aprobacion politica aprobacion compras monto umbral orden de compra"}, "result": {"answer": "Requiere aprobación.", "sources": [{"doc_name": "purchase_approvals.md", "score": 0.9}], "tokens_used": 20}},
+            ],
+            "partial_failure": False,
+        }):
+            second = ask_hybrid_agent("esta compra requiere aprobacion?", session_id="flow-persisted-memory", context=scoped_context, history=[])
+
+        self.assertEqual(second["route_selected"], "mixed")
+        self.assertTrue(second["memory_hit"])
+        self.assertEqual(second["active_model"], "purchase.order")
+
+    def test_persisted_memory_is_scoped_by_user(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_search", "query_odoo_read"],
+            "results": [
+                {"tool": "query_odoo_search", "args": {"model": "purchase.order"}, "result": [113]},
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 113, "name": "PO-I-10-00026", "amount_total": 122100.0, "currency_id": [155, "PEN"], "state": "purchase"}]},
+            ],
+            "partial_failure": False,
+        }):
+            ask_hybrid_agent(
+                "¿Cuánto de monto tiene PO-I-10-00026?",
+                session_id="flow-user-scope",
+                context={"security": {"uid": 7, "db_name": "odoo_demo"}, "memory": {}},
+                history=[],
+            )
+
+        with patch("app.agents.orchestrator.execute_plan") as execute_plan:
+            result = ask_hybrid_agent(
+                "esta compra requiere aprobacion?",
+                session_id="flow-user-scope",
+                context={"security": {"uid": 8, "db_name": "odoo_demo"}, "memory": {}},
+                history=[],
+            )
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertFalse(result["memory_hit"])
+        execute_plan.assert_not_called()
 
     def test_relative_policy_without_memory_asks_for_clarification(self):
         with patch("app.agents.orchestrator.execute_plan") as execute_plan:

@@ -15,6 +15,13 @@ from typing import Any
 DEFAULT_DATASET = Path(__file__).resolve().parent / "datasets" / "orchestrator_smoke.jsonl"
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as handle:
@@ -52,8 +59,9 @@ def _models_from_response(response: dict[str, Any]) -> set[str]:
     return models
 
 
-def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> dict[str, Any]:
+def evaluate_case(case: dict[str, Any], response: dict[str, Any], *, enforce_latency: bool = False) -> dict[str, Any]:
     failures: list[str] = []
+    warnings: list[str] = []
     expected_route = case.get("expected_route")
     expected_intent = case.get("expected_intent")
     expected_tools = case.get("expected_tools")
@@ -79,7 +87,11 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> dict[str, A
     if case.get("max_latency_ms") is not None:
         latency = response.get("latency_ms")
         if not isinstance(latency, (int, float)) or latency > float(case["max_latency_ms"]):
-            failures.append(f"latency expected<={case['max_latency_ms']} actual={latency!r}")
+            message = f"latency expected<={case['max_latency_ms']} actual={latency!r}"
+            if enforce_latency:
+                failures.append(message)
+            else:
+                warnings.append(message)
     for expected_text in case.get("answer_contains") or []:
         if str(expected_text).lower() not in str(response.get("answer") or "").lower():
             failures.append(f"answer missing {expected_text!r}")
@@ -89,6 +101,7 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any]) -> dict[str, A
         "question": case["question"],
         "ok": not failures,
         "failures": failures,
+        "warnings": warnings,
         "route": actual_route,
         "intent": response.get("intent_detected"),
         "tools": actual_tools,
@@ -122,6 +135,12 @@ def summarize_results(results: list[dict[str, Any]], duration_ms: float) -> dict
     )
     passed = sum(1 for item in results if item.get("ok"))
     failed = len(results) - passed
+    latency_warnings = [
+        warning
+        for item in results
+        for warning in (item.get("warnings") or [])
+        if str(warning).startswith("latency ")
+    ]
 
     return {
         "pass_rate": round((passed / len(results)) * 100, 2) if results else 0.0,
@@ -140,6 +159,7 @@ def summarize_results(results: list[dict[str, Any]], duration_ms: float) -> dict
         "intents": dict(sorted(intents.items())),
         "tools": dict(sorted(tools.items())),
         "error_types": dict(sorted(error_types.items())),
+        "latency_warning_count": len(latency_warnings),
         "failed_case_ids": [item["id"] for item in results if not item.get("ok")],
         "passed": passed,
         "failed": failed,
@@ -161,6 +181,13 @@ def _default_context(uid: int | None, company_id: int | None, request_id: str) -
         context["access_context"] = dict(context["security"])
         context["user"] = {"id": uid}
         context["company"] = {"id": company_id}
+    db_name = os.getenv("AI_EVAL_DB_NAME") or os.getenv("EVAL_ODOO_DB") or os.getenv("ODOO_DB")
+    if db_name:
+        context["db_name"] = db_name
+        if "security" in context:
+            context["security"]["db_name"] = db_name
+        if "access_context" in context:
+            context["access_context"]["db_name"] = db_name
     return context
 
 
@@ -204,7 +231,7 @@ def run_eval(args: argparse.Namespace) -> dict[str, Any]:
     for case in dataset:
         try:
             response = call_http(args.url, args.token, case, args.uid, args.company_id)
-            result = evaluate_case(case, response)
+            result = evaluate_case(case, response, enforce_latency=args.enforce_latency)
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as exc:
             result = {
                 "id": case["id"],
@@ -237,6 +264,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--uid", type=int, default=int(os.getenv("AI_EVAL_UID", "2")))
     parser.add_argument("--company-id", type=int, default=int(os.getenv("AI_EVAL_COMPANY_ID", "1")))
     parser.add_argument("--dry-run", action="store_true", help="Only validate the dataset format.")
+    parser.add_argument(
+        "--enforce-latency",
+        action="store_true",
+        default=_env_bool("EVAL_ENFORCE_LATENCY", default=False),
+        help="Fail cases that exceed max_latency_ms. By default latency is reported as a warning.",
+    )
     parser.add_argument("--report", help="Optional JSON report output path.")
     args = parser.parse_args(argv)
 

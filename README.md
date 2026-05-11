@@ -218,6 +218,18 @@ AI_SERVICE_AUTH_REQUIRED=true
 
 En Docker Compose, el AI Service recibe `AI_SERVICE_API_KEY` a partir de `ODOO_AI_TOKEN`.
 
+Memoria conversacional:
+
+```env
+MEMORY_STORE=in_memory
+MEMORY_TTL_SECONDS=86400
+# Opcional para backend persistente:
+MEMORY_STORE=postgres
+MEMORY_DATABASE_URL=postgresql://user:password@host:5432/dbname
+```
+
+Por defecto se usa `in_memory` para desarrollo y CI. Para producción, `postgres` guarda la memoria por `db_name + user_id + session_id`, con TTL y sanitización de campos sensibles.
+
 Variables para RAG:
 
 ```env
@@ -464,7 +476,10 @@ Variables útiles:
 PG_VERSION=15 make eval-real
 EVAL_ODOO_DB=admin make eval-real
 EVAL_REPORT_PATH=evals/reports/my-run.json make eval-real
+EVAL_ENFORCE_LATENCY=true make eval-real
 ```
+
+Por defecto, `eval-real` no falla por latencia del proveedor LLM/RAG: conserva `latency_ms` y `latency_warning_count` en el reporte. Para usar los umbrales `max_latency_ms` como gate duro, activa `EVAL_ENFORCE_LATENCY=true`.
 
 Reporte de evaluación real de muestra:
 
@@ -482,6 +497,18 @@ El orquestador endurece el uso de memoria conversacional para evitar contaminaci
 - Preguntas contextuales como `cuanto es el total`, `cual es su estado` o `esta compra requiere aprobacion` sí pueden usar la entidad activa.
 - Las rutas `knowledge` y `mixed` pasan la pregunta normalizada a `search_knowledge` para mejorar retrieval.
 - `odoo_evidence` expone una muestra real y sanitizada del resultado de la tool en `result_sample`.
+
+### Persistent Conversation Memory
+
+La memoria de conversación puede vivir en el AI Service, no solo en el payload enviado por Odoo:
+
+- Scope estricto: `db_name + user_id + session_id`.
+- Precedencia: entidad explícita detectada > memoria enviada en request > memoria persistida.
+- TTL configurable con `MEMORY_TTL_SECONDS`.
+- Backend default `in_memory` para local/tests.
+- Backend opcional `postgres` usando `MEMORY_DATABASE_URL`.
+- Fallback seguro: si el store falla, el orquestador sigue respondiendo sin memoria persistida.
+- El addon Odoo envía `db_name` y contexto de seguridad para aislar memoria por base y usuario.
 
 ## CI/CD
 

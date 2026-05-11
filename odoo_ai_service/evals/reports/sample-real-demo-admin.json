@@ -3,19 +3,19 @@
   "cases": 30,
   "passed": 30,
   "failed": 0,
-  "duration_ms": 21225.7,
+  "duration_ms": 30087.26,
   "summary": {
     "pass_rate": 100.0,
-    "duration_ms": 21225.7,
+    "duration_ms": 30087.26,
     "latency_ms": {
-      "avg": 704.84,
-      "p50": 21.75,
-      "p95": 3688.18,
-      "max": 4088.36
+      "avg": 997.33,
+      "p50": 74.55,
+      "p95": 5844.21,
+      "max": 6097.11
     },
     "tokens": {
-      "total": 4968,
-      "avg": 165.6
+      "total": 4915,
+      "avg": 163.83
     },
     "routes": {
       "clarification": 5,
@@ -41,6 +41,7 @@
       "search_knowledge": 6
     },
     "error_types": {},
+    "latency_warning_count": 2,
     "failed_case_ids": [],
     "passed": 30,
     "failed": 0
@@ -51,12 +52,13 @@
       "question": "cuantas ventas hay",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 298.19,
+      "latency_ms": 1830.6,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -67,12 +69,13 @@
       "question": "cantidad de ventas confirmadas",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 19.94,
+      "latency_ms": 69.29,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -83,12 +86,13 @@
       "question": "numero de ventas",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 19.27,
+      "latency_ms": 74.55,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -99,12 +103,13 @@
       "question": "top clientes por facturacion",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 23.72,
+      "latency_ms": 167.58,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -115,12 +120,13 @@
       "question": "ranking de clientes por facturacion",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 21.41,
+      "latency_ms": 82.82,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -131,12 +137,13 @@
       "question": "top clientes por ventas",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 20.27,
+      "latency_ms": 58.42,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -147,12 +154,13 @@
       "question": "cuantas compras hay",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 20.08,
+      "latency_ms": 101.75,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -163,12 +171,13 @@
       "question": "cuantas facturas hay",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 22.94,
+      "latency_ms": 95.79,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -179,13 +188,14 @@
       "question": "cuanto de monto tiene la venta DCN 0426-0039",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "amount_lookup",
       "tools": [
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 39.61,
+      "latency_ms": 95.78,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -196,13 +206,14 @@
       "question": "cuanto de monto tiene PO-I-10-00026",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "amount_lookup",
       "tools": [
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 38.84,
+      "latency_ms": 166.83,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -213,13 +224,14 @@
       "question": "estado de la venta DCN 0426-0039",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "status_lookup",
       "tools": [
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 37.95,
+      "latency_ms": 75.01,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -230,13 +242,14 @@
       "question": "estado de la factura INV/2026/00001",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "status_lookup",
       "tools": [
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 38.44,
+      "latency_ms": 65.84,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -247,10 +260,11 @@
       "question": "que productos se vendieron",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "clarification",
       "intent": "line_items",
       "tools": [],
-      "latency_ms": 0.07,
+      "latency_ms": 18.52,
       "tokens_used": 0,
       "grounded": false,
       "response_faithful": true,
@@ -261,10 +275,11 @@
       "question": "muestrame sus productos",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "clarification",
       "intent": "line_items",
       "tools": [],
-      "latency_ms": 0.05,
+      "latency_ms": 18.28,
       "tokens_used": 0,
       "grounded": false,
       "response_faithful": true,
@@ -275,10 +290,11 @@
       "question": "debio aprobarse esta compra segun la politica",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "clarification",
       "intent": "policy_validation",
       "tools": [],
-      "latency_ms": 0.03,
+      "latency_ms": 16.87,
       "tokens_used": 0,
       "grounded": false,
       "response_faithful": true,
@@ -289,13 +305,16 @@
       "question": "como funciona la politica de aprobacion de compras",
       "ok": true,
       "failures": [],
+      "warnings": [
+        "latency expected<=5000 actual=5844.21"
+      ],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 3688.18,
-      "tokens_used": 689,
+      "latency_ms": 5844.21,
+      "tokens_used": 659,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -305,13 +324,16 @@
       "question": "explica el proceso de compras",
       "ok": true,
       "failures": [],
+      "warnings": [
+        "latency expected<=5000 actual=6097.11"
+      ],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 4088.36,
-      "tokens_used": 820,
+      "latency_ms": 6097.11,
+      "tokens_used": 811,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -321,13 +343,14 @@
       "question": "como funciona el proceso de inventario",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 3575.98,
-      "tokens_used": 632,
+      "latency_ms": 3757.86,
+      "tokens_used": 617,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -337,6 +360,7 @@
       "question": "cumple PO-I-10-00026 segun la politica",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "mixed",
       "intent": "policy_validation",
       "tools": [
@@ -344,8 +368,8 @@
         "query_odoo_read",
         "search_knowledge"
       ],
-      "latency_ms": 1937.93,
-      "tokens_used": 595,
+      "latency_ms": 2674.13,
+      "tokens_used": 590,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -355,6 +379,7 @@
       "question": "cumple la venta DCN 0426-0039 segun la politica",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "mixed",
       "intent": "policy_validation",
       "tools": [
@@ -362,8 +387,8 @@
         "query_odoo_read",
         "search_knowledge"
       ],
-      "latency_ms": 2447.88,
-      "tokens_used": 497,
+      "latency_ms": 3053.85,
+      "tokens_used": 480,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -373,12 +398,13 @@
       "question": "top proveedores por compras",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 21.75,
+      "latency_ms": 51.61,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -389,11 +415,12 @@
       "question": "hazme una recomendacion creativa",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "fallback",
       "intent": null,
       "tools": [],
-      "latency_ms": 1203.82,
-      "tokens_used": 1051,
+      "latency_ms": 1494.83,
+      "tokens_used": 1072,
       "grounded": false,
       "response_faithful": false,
       "error_type": null
@@ -403,12 +430,13 @@
       "question": "clientes con mayor facturacion",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 21.39,
+      "latency_ms": 40.6,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -419,12 +447,13 @@
       "question": "mayores clientes por ventas",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "ranking",
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 20.06,
+      "latency_ms": 38.53,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -435,12 +464,13 @@
       "question": "numero de ordenes de compra",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 23.36,
+      "latency_ms": 36.0,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -451,12 +481,13 @@
       "question": "cantidad de facturas",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 19.47,
+      "latency_ms": 49.23,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,
@@ -467,13 +498,14 @@
       "question": "segun la documentacion como debo aprobar compras",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 3476.09,
-      "tokens_used": 684,
+      "latency_ms": 3782.24,
+      "tokens_used": 686,
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -483,10 +515,11 @@
       "question": "cual es su estado",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "clarification",
       "intent": "status_lookup",
       "tools": [],
-      "latency_ms": 0.09,
+      "latency_ms": 9.42,
       "tokens_used": 0,
       "grounded": false,
       "response_faithful": true,
@@ -497,10 +530,11 @@
       "question": "cuanto es el total",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "clarification",
       "intent": "amount_lookup",
       "tools": [],
-      "latency_ms": 0.05,
+      "latency_ms": 15.75,
       "tokens_used": 0,
       "grounded": false,
       "response_faithful": true,
@@ -511,12 +545,13 @@
       "question": "cuantas ordenes de venta hay",
       "ok": true,
       "failures": [],
+      "warnings": [],
       "route": "erp_data",
       "intent": "count",
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 19.9,
+      "latency_ms": 36.62,
       "tokens_used": 0,
       "grounded": true,
       "response_faithful": true,

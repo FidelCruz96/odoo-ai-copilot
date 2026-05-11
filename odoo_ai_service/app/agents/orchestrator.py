@@ -24,7 +24,7 @@ from app.agents.response_composer import (
 from app.agents.route_selector import CLARIFICATION, ERP_DATA, FALLBACK, KNOWLEDGE, MIXED, select_route
 from app.agents.tool_executor import execute_plan
 from app.agents.types import AgentContext, AgentMetrics, AgentResponse, Entity, KnowledgeResult, ToolExecutionResult
-from app.memory.memory_store import load_memory, persist_memory
+from app.memory.memory_store import load_memory, memory_scope_from_context, persist_memory
 from app.memory.schemas import ActiveEntity, ConversationMemory
 
 
@@ -134,23 +134,29 @@ def _clarification_message(intent: str | None, context_message: str | None = Non
 
 def _memory_from_success(
     session_id: str,
+    user_id: int,
+    db_name: str,
     existing_memory: ConversationMemory | None,
     route: str,
     intent: str | None,
     domain: str | None,
+    question: str,
     tools_used: list[str],
     record: dict[str, Any] | None,
     entity: Entity | None,
     knowledge_result: KnowledgeResult | None,
 ) -> tuple[dict[str, Any], bool]:
     base = existing_memory or ConversationMemory(session_id=session_id)
+    base.session_id = session_id
+    base.user_id = user_id
+    base.db_name = db_name
     memory_updated = False
 
     if record and isinstance(record.get("id"), int):
         entity_type = entity.get("type") if isinstance(entity, dict) and entity.get("type") != "relative_reference" else f"{domain}_entity"
         active_entity = ActiveEntity(
             type=str(entity_type or record.get("name") or "entity"),
-            model=str(entity.get("model") if isinstance(entity, dict) and entity.get("model") else ""),
+            model=str(entity.get("model") if isinstance(entity, dict) and entity.get("model") else record.get("model") or ""),
             id=int(record["id"]),
             name=record.get("name"),
             confidence=float(entity.get("confidence") or 1.0) if isinstance(entity, dict) else 1.0,
@@ -163,12 +169,14 @@ def _memory_from_success(
         }
         memory_updated = True
 
+    base.active_domain = domain
     base.last_route = route
     base.last_intent = intent
+    base.last_question = question
     base.last_tools_used = list(tools_used or [])
     base.last_sources = [source.get("doc_name") for source in (knowledge_result or {}).get("sources", [])]
 
-    persist_memory(base)
+    persist_memory(base, user_id=user_id, db_name=db_name)
     return base.to_context_dict(), memory_updated
 
 
@@ -183,6 +191,8 @@ def ask_hybrid_agent(
     trace_id = base_context.get("request_id") or str(uuid4())
     base_context["request_id"] = trace_id
     resolved_session_id = session_id or trace_id
+    scoped_user_id, scoped_session_id, scoped_db_name = memory_scope_from_context(resolved_session_id, base_context)
+    resolved_session_id = scoped_session_id
     normalized_question = normalize(question)
 
     entity = resolve_entity(normalized_question)
@@ -406,10 +416,13 @@ def ask_hybrid_agent(
 
     response_memory, memory_updated = _memory_from_success(
         session_id=resolved_session_id,
+        user_id=scoped_user_id,
+        db_name=scoped_db_name,
         existing_memory=memory,
         route=route,
         intent=intent,
         domain=domain,
+        question=normalized_question,
         tools_used=tools_used,
         record=primary_record if grounded or route == ERP_DATA else None,
         entity=plan_entity,

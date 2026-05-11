@@ -501,6 +501,7 @@ def _access_context_for_user(user, company, ctx):
         "allowed_company_ids": allowed_company_ids,
         "groups": group_xmlids,
         "groups_hash": _hash_groups(group_xmlids),
+        "db_name": request.env.cr.dbname,
         "lang": ctx.get("lang"),
         "tz": ctx.get("tz"),
     }
@@ -802,6 +803,7 @@ class AIChatController(http.Controller):
             "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
+                "db_name": request.env.cr.dbname,
                 "security": access_context,
                 "access_context": access_context,
                 "company": {
@@ -915,6 +917,7 @@ class AIChatController(http.Controller):
             "history": history_payload,
             "context": {
                 "user": {"id": user.id, "name": user.name},
+                "db_name": request.env.cr.dbname,
                 "security": access_context,
                 "access_context": access_context,
                 "company": {
