@@ -5,6 +5,7 @@ import logging
 
 from app.knowledge.rag_service import get_rag_service
 from app.knowledge.schemas import QueryRequest
+from app.observability import emit_event
 
 logger = logging.getLogger("odoo_ai_service")
 
@@ -37,16 +38,14 @@ def search_knowledge(query: str, module: str | None = None, doc_id: str | None =
         QueryRequest(query=query, filters=filters or None, top_k=top_k)
     )
     result = _dump_model(response)
-    logger.info(
-        "KNOWLEDGE_QUERY_END %s",
-        json.dumps(
-            {
-                "trace_id": result.get("trace_id"),
-                "sources_count": len(result.get("sources") or []),
-                "latency_ms": result.get("latency_ms"),
-                "tokens_used": result.get("tokens_used"),
-            },
-            ensure_ascii=False,
-        ),
+    emit_event(
+        logger,
+        "KNOWLEDGE_QUERY_END",
+        trace_id=result.get("trace_id"),
+        sources_count=len(result.get("sources") or []),
+        latency_ms=result.get("latency_ms"),
+        retrieval_ms=result.get("retrieval_ms"),
+        llm_ms=result.get("llm_ms"),
+        tokens_used=result.get("tokens_used"),
     )
     return result

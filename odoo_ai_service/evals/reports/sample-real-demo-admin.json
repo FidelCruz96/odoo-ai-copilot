@@ -3,19 +3,19 @@
   "cases": 30,
   "passed": 30,
   "failed": 0,
-  "duration_ms": 30087.26,
+  "duration_ms": 26041.65,
   "summary": {
     "pass_rate": 100.0,
-    "duration_ms": 30087.26,
+    "duration_ms": 26041.65,
     "latency_ms": {
-      "avg": 997.33,
-      "p50": 74.55,
-      "p95": 5844.21,
-      "max": 6097.11
+      "avg": 864.19,
+      "p50": 32.37,
+      "p95": 4303.96,
+      "max": 4493.2
     },
     "tokens": {
-      "total": 4915,
-      "avg": 163.83
+      "total": 4078,
+      "avg": 135.93
     },
     "routes": {
       "clarification": 5,
@@ -41,7 +41,7 @@
       "search_knowledge": 6
     },
     "error_types": {},
-    "latency_warning_count": 2,
+    "latency_warning_count": 0,
     "failed_case_ids": [],
     "passed": 30,
     "failed": 0
@@ -58,8 +58,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 1830.6,
+      "latency_ms": 405.16,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 403.97,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 403.97
+        },
+        "memory_latency_ms": {
+          "load": 0.14,
+          "save": 0.22
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -75,8 +96,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 69.29,
+      "latency_ms": 26.89,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 26.51,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 26.51
+        },
+        "memory_latency_ms": {
+          "load": 0.08,
+          "save": 0.11
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -92,8 +134,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 74.55,
+      "latency_ms": 26.1,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 25.71,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 25.71
+        },
+        "memory_latency_ms": {
+          "load": 0.09,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -109,8 +172,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 167.58,
+      "latency_ms": 31.64,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 31.23,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 31.23
+        },
+        "memory_latency_ms": {
+          "load": 0.06,
+          "save": 0.1
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -126,8 +210,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 82.82,
+      "latency_ms": 29.98,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 29.59,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 29.59
+        },
+        "memory_latency_ms": {
+          "load": 0.09,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -143,8 +248,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 58.42,
+      "latency_ms": 25.87,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 25.51,
+            "result_size": 4,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 25.51
+        },
+        "memory_latency_ms": {
+          "load": 0.07,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -160,8 +286,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 101.75,
+      "latency_ms": 30.79,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 30.47,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 30.47
+        },
+        "memory_latency_ms": {
+          "load": 0.06,
+          "save": 0.08
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -177,8 +324,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 95.79,
+      "latency_ms": 28.71,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 28.37,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 28.37
+        },
+        "memory_latency_ms": {
+          "load": 0.05,
+          "save": 0.12
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -195,8 +363,39 @@
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 95.78,
+      "latency_ms": 57.18,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 27.63,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 28.87,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 27.63,
+          "query_odoo_read": 28.87
+        },
+        "memory_latency_ms": {
+          "load": 0.14,
+          "save": 0.12
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -213,8 +412,39 @@
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 166.83,
+      "latency_ms": 59.59,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 32.01,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 27.18,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 32.01,
+          "query_odoo_read": 27.18
+        },
+        "memory_latency_ms": {
+          "load": 0.08,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -231,8 +461,39 @@
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 75.01,
+      "latency_ms": 48.84,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 22.9,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 25.43,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 22.9,
+          "query_odoo_read": 25.43
+        },
+        "memory_latency_ms": {
+          "load": 0.05,
+          "save": 0.13
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -249,8 +510,39 @@
         "query_odoo_search",
         "query_odoo_read"
       ],
-      "latency_ms": 65.84,
+      "latency_ms": 45.27,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 23.29,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 21.54,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 23.29,
+          "query_odoo_read": 21.54
+        },
+        "memory_latency_ms": {
+          "load": 0.05,
+          "save": 0.13
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -264,8 +556,9 @@
       "route": "clarification",
       "intent": "line_items",
       "tools": [],
-      "latency_ms": 18.52,
+      "latency_ms": 0.12,
       "tokens_used": 0,
+      "observability": {},
       "grounded": false,
       "response_faithful": true,
       "error_type": null
@@ -279,8 +572,9 @@
       "route": "clarification",
       "intent": "line_items",
       "tools": [],
-      "latency_ms": 18.28,
+      "latency_ms": 0.09,
       "tokens_used": 0,
+      "observability": {},
       "grounded": false,
       "response_faithful": true,
       "error_type": null
@@ -294,8 +588,9 @@
       "route": "clarification",
       "intent": "policy_validation",
       "tools": [],
-      "latency_ms": 16.87,
+      "latency_ms": 0.2,
       "tokens_used": 0,
+      "observability": {},
       "grounded": false,
       "response_faithful": true,
       "error_type": null
@@ -305,16 +600,43 @@
       "question": "como funciona la politica de aprobacion de compras",
       "ok": true,
       "failures": [],
-      "warnings": [
-        "latency expected<=5000 actual=5844.21"
-      ],
+      "warnings": [],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 5844.21,
-      "tokens_used": 659,
+      "latency_ms": 4303.96,
+      "tokens_used": 519,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 4303.26,
+            "result_size": 3,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 1230.5,
+            "llm_ms": 3057.39,
+            "sources_count": 3,
+            "tokens_used": 519
+          }
+        ],
+        "tool_latencies": {
+          "search_knowledge": 4303.26
+        },
+        "memory_latency_ms": {
+          "load": 0.04,
+          "save": 0.35
+        },
+        "rag_latency_ms": {
+          "total": 4288.1,
+          "retrieval": 1230.5,
+          "llm": 3057.39
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -324,16 +646,43 @@
       "question": "explica el proceso de compras",
       "ok": true,
       "failures": [],
-      "warnings": [
-        "latency expected<=5000 actual=6097.11"
-      ],
+      "warnings": [],
       "route": "knowledge",
       "intent": "explanation",
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 6097.11,
-      "tokens_used": 811,
+      "latency_ms": 3405.17,
+      "tokens_used": 507,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 3404.41,
+            "result_size": 3,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 560.14,
+            "llm_ms": 2814.86,
+            "sources_count": 3,
+            "tokens_used": 507
+          }
+        ],
+        "tool_latencies": {
+          "search_knowledge": 3404.41
+        },
+        "memory_latency_ms": {
+          "load": 0.33,
+          "save": 0.1
+        },
+        "rag_latency_ms": {
+          "total": 3375.93,
+          "retrieval": 560.14,
+          "llm": 2814.86
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -349,8 +698,37 @@
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 3757.86,
-      "tokens_used": 617,
+      "latency_ms": 3602.36,
+      "tokens_used": 410,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 3602.02,
+            "result_size": 2,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 449.47,
+            "llm_ms": 3138.08,
+            "sources_count": 2,
+            "tokens_used": 410
+          }
+        ],
+        "tool_latencies": {
+          "search_knowledge": 3602.02
+        },
+        "memory_latency_ms": {
+          "load": 0.1,
+          "save": 0.08
+        },
+        "rag_latency_ms": {
+          "total": 3587.67,
+          "retrieval": 449.47,
+          "llm": 3138.08
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -368,8 +746,57 @@
         "query_odoo_read",
         "search_knowledge"
       ],
-      "latency_ms": 2674.13,
-      "tokens_used": 590,
+      "latency_ms": 3193.84,
+      "tokens_used": 513,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 21.93,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 23.44,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 3147.36,
+            "result_size": 3,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 1049.41,
+            "llm_ms": 2085.59,
+            "sources_count": 3,
+            "tokens_used": 513
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 21.93,
+          "query_odoo_read": 23.44,
+          "search_knowledge": 3147.36
+        },
+        "memory_latency_ms": {
+          "load": 0.05,
+          "save": 0.35
+        },
+        "rag_latency_ms": {
+          "total": 3135.21,
+          "retrieval": 1049.41,
+          "llm": 2085.59
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -387,8 +814,57 @@
         "query_odoo_read",
         "search_knowledge"
       ],
-      "latency_ms": 3053.85,
-      "tokens_used": 480,
+      "latency_ms": 2300.09,
+      "tokens_used": 405,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_search",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 60.48,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "query_odoo_read",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 22.64,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          },
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 2215.76,
+            "result_size": 2,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 781.25,
+            "llm_ms": 1421.42,
+            "sources_count": 2,
+            "tokens_used": 405
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_search": 60.48,
+          "query_odoo_read": 22.64,
+          "search_knowledge": 2215.76
+        },
+        "memory_latency_ms": {
+          "load": 0.26,
+          "save": 0.2
+        },
+        "rag_latency_ms": {
+          "total": 2202.81,
+          "retrieval": 781.25,
+          "llm": 1421.42
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -404,8 +880,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 51.61,
+      "latency_ms": 32.37,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 32.04,
+            "result_size": 5,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 32.04
+        },
+        "memory_latency_ms": {
+          "load": 0.06,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -419,8 +916,9 @@
       "route": "fallback",
       "intent": null,
       "tools": [],
-      "latency_ms": 1494.83,
-      "tokens_used": 1072,
+      "latency_ms": 4493.2,
+      "tokens_used": 1228,
+      "observability": {},
       "grounded": false,
       "response_faithful": false,
       "error_type": null
@@ -436,8 +934,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 40.6,
+      "latency_ms": 75.9,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 74.5,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 74.5
+        },
+        "memory_latency_ms": {
+          "load": 0.52,
+          "save": 0.15
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -453,8 +972,29 @@
       "tools": [
         "query_odoo_group"
       ],
-      "latency_ms": 38.53,
+      "latency_ms": 60.56,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_group",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 59.91,
+            "result_size": 4,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_group": 59.91
+        },
+        "memory_latency_ms": {
+          "load": 0.26,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -470,8 +1010,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 36.0,
+      "latency_ms": 28.64,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "purchase.order",
+            "operation": null,
+            "latency_ms": 28.29,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 28.29
+        },
+        "memory_latency_ms": {
+          "load": 0.1,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -487,8 +1048,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 49.23,
+      "latency_ms": 29.13,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "account.move",
+            "operation": null,
+            "latency_ms": 28.78,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 28.78
+        },
+        "memory_latency_ms": {
+          "load": 0.08,
+          "save": 0.09
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -504,8 +1086,37 @@
       "tools": [
         "search_knowledge"
       ],
-      "latency_ms": 3782.24,
-      "tokens_used": 686,
+      "latency_ms": 3493.59,
+      "tokens_used": 496,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "search_knowledge",
+            "model": null,
+            "operation": null,
+            "latency_ms": 3492.54,
+            "result_size": 3,
+            "success": true,
+            "error_type": null,
+            "retrieval_ms": 769.09,
+            "llm_ms": 2704.94,
+            "sources_count": 3,
+            "tokens_used": 496
+          }
+        ],
+        "tool_latencies": {
+          "search_knowledge": 3492.54
+        },
+        "memory_latency_ms": {
+          "load": 0.1,
+          "save": 0.3
+        },
+        "rag_latency_ms": {
+          "total": 3474.23,
+          "retrieval": 769.09,
+          "llm": 2704.94
+        }
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null
@@ -519,8 +1130,9 @@
       "route": "clarification",
       "intent": "status_lookup",
       "tools": [],
-      "latency_ms": 9.42,
+      "latency_ms": 0.77,
       "tokens_used": 0,
+      "observability": {},
       "grounded": false,
       "response_faithful": true,
       "error_type": null
@@ -534,8 +1146,9 @@
       "route": "clarification",
       "intent": "amount_lookup",
       "tools": [],
-      "latency_ms": 15.75,
+      "latency_ms": 0.78,
       "tokens_used": 0,
+      "observability": {},
       "grounded": false,
       "response_faithful": true,
       "error_type": null
@@ -551,8 +1164,29 @@
       "tools": [
         "query_odoo_count"
       ],
-      "latency_ms": 36.62,
+      "latency_ms": 88.81,
       "tokens_used": 0,
+      "observability": {
+        "tool_trace": [
+          {
+            "tool": "query_odoo_count",
+            "model": "sale.order",
+            "operation": null,
+            "latency_ms": 87.65,
+            "result_size": 1,
+            "success": true,
+            "error_type": null
+          }
+        ],
+        "tool_latencies": {
+          "query_odoo_count": 87.65
+        },
+        "memory_latency_ms": {
+          "load": 0.12,
+          "save": 0.38
+        },
+        "rag_latency_ms": {}
+      },
       "grounded": true,
       "response_faithful": true,
       "error_type": null

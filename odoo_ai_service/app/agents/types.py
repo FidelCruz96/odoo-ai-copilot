@@ -83,12 +83,28 @@ class ToolExecutionRow(TypedDict, total=False):
     tool: str
     args: ToolArguments
     result: Any
+    latency_ms: float
+
+
+class ToolTraceRow(TypedDict, total=False):
+    tool: str | None
+    model: str | None
+    operation: str | None
+    latency_ms: float
+    result_size: int | None
+    success: bool
+    error_type: str | None
+    retrieval_ms: float | None
+    llm_ms: float | None
+    sources_count: int
+    tokens_used: int | None
 
 
 class ToolExecutionResult(TypedDict, total=False):
     success: bool
     tools_used: list[str]
     results: list[ToolExecutionRow]
+    tool_trace: list[ToolTraceRow]
     partial_failure: bool
     error_type: str | None
     message: str | None
@@ -107,6 +123,11 @@ class KnowledgeResult(TypedDict, total=False):
     answer: str
     sources: list[KnowledgeSource]
     tokens_used: int
+    latency_ms: float
+    retrieval_ms: float
+    llm_ms: float
+    raw_chunks: int
+    filtered_chunks: int
 
 
 class OdooEvidence(TypedDict, total=False):

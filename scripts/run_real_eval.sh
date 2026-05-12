@@ -44,7 +44,8 @@ PY
 echo "==> Installing eval ERP demo data module"
 docker exec "$ODOO_CONTAINER_NAME" "$ODOO_BIN" \
   -d "$ODOO_DB_NAME" \
-  -i odoo_ai_eval_demo \
+  -i odoo_ai_assistant,odoo_ai_eval_demo \
+  -u odoo_ai_assistant \
   --stop-after-init \
   --db_host "$ODOO_DB_HOST" \
   --db_port "$ODOO_DB_PORT" \

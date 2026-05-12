@@ -3,9 +3,11 @@ from __future__ import annotations
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from time import perf_counter
 from typing import Any, Protocol
 
 from app.memory.schemas import ActiveEntity, ConversationMemory
+from app.observability import emit_event
 
 logger = logging.getLogger("odoo_ai_service")
 
@@ -335,21 +337,85 @@ def _memory_from_context_dict(
 
 def load_memory(session_id: str | None, context: dict | None) -> ConversationMemory | None:
     user_id, scoped_session_id, db_name = _extract_scope_from_context(session_id, context)
+    trace_id = context.get("request_id") if isinstance(context, dict) else None
+    started_at = perf_counter()
     raw_memory = context.get("memory") if isinstance(context, dict) else None
     if isinstance(raw_memory, dict):
         if raw_memory:
-            return _memory_from_context_dict(scoped_session_id, raw_memory, user_id=user_id, db_name=db_name)
+            memory = _memory_from_context_dict(scoped_session_id, raw_memory, user_id=user_id, db_name=db_name)
+            emit_event(
+                logger,
+                "MEMORY_LOAD",
+                trace_id=trace_id,
+                store="request",
+                db_name=db_name,
+                user_id=user_id,
+                session_id=scoped_session_id,
+                hit=bool(memory.active_entity),
+                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+            )
+            return memory
         try:
-            return get_store().get(user_id=user_id, session_id=scoped_session_id, db_name=db_name)
+            memory = get_store().get(user_id=user_id, session_id=scoped_session_id, db_name=db_name)
+            emit_event(
+                logger,
+                "MEMORY_LOAD",
+                trace_id=trace_id,
+                store=os.getenv("MEMORY_STORE", "in_memory"),
+                db_name=db_name,
+                user_id=user_id,
+                session_id=scoped_session_id,
+                hit=bool(memory and memory.active_entity),
+                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+            )
+            return memory
         except Exception:
             logger.exception("conversation_memory_load_failed")
+            emit_event(
+                logger,
+                "MEMORY_LOAD",
+                trace_id=trace_id,
+                store=os.getenv("MEMORY_STORE", "in_memory"),
+                db_name=db_name,
+                user_id=user_id,
+                session_id=scoped_session_id,
+                hit=False,
+                success=False,
+                error_type="memory_load_failed",
+                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+            )
             return None
 
     if session_id:
         try:
-            return get_store().get(user_id=user_id, session_id=scoped_session_id, db_name=db_name)
+            memory = get_store().get(user_id=user_id, session_id=scoped_session_id, db_name=db_name)
+            emit_event(
+                logger,
+                "MEMORY_LOAD",
+                trace_id=trace_id,
+                store=os.getenv("MEMORY_STORE", "in_memory"),
+                db_name=db_name,
+                user_id=user_id,
+                session_id=scoped_session_id,
+                hit=bool(memory and memory.active_entity),
+                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+            )
+            return memory
         except Exception:
             logger.exception("conversation_memory_load_failed")
+            emit_event(
+                logger,
+                "MEMORY_LOAD",
+                trace_id=trace_id,
+                store=os.getenv("MEMORY_STORE", "in_memory"),
+                db_name=db_name,
+                user_id=user_id,
+                session_id=scoped_session_id,
+                hit=False,
+                success=False,
+                error_type="memory_load_failed",
+                latency_ms=round((perf_counter() - started_at) * 1000, 2),
+            )
     return None
 
 
@@ -359,10 +425,34 @@ def persist_memory(memory: ConversationMemory, *, user_id: int | None = None, db
         session_id=memory.session_id,
         db_name=db_name if db_name is not None else memory.db_name,
     )
+    started_at = perf_counter()
     try:
         get_store().save(user_id=scoped_user_id, session_id=scoped_session_id, db_name=scoped_db_name, memory=memory)
+        emit_event(
+            logger,
+            "MEMORY_SAVE",
+            trace_id=(memory.metadata or {}).get("trace_id"),
+            store=os.getenv("MEMORY_STORE", "in_memory"),
+            db_name=scoped_db_name,
+            user_id=scoped_user_id,
+            session_id=scoped_session_id,
+            success=True,
+            latency_ms=round((perf_counter() - started_at) * 1000, 2),
+        )
     except Exception:
         logger.exception("conversation_memory_persist_failed")
+        emit_event(
+            logger,
+            "MEMORY_SAVE",
+            trace_id=(memory.metadata or {}).get("trace_id"),
+            store=os.getenv("MEMORY_STORE", "in_memory"),
+            db_name=scoped_db_name,
+            user_id=scoped_user_id,
+            session_id=scoped_session_id,
+            success=False,
+            error_type="memory_save_failed",
+            latency_ms=round((perf_counter() - started_at) * 1000, 2),
+        )
 
 
 def clear_memory(session_id: str, context: dict | None = None) -> None:

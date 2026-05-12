@@ -426,10 +426,29 @@ El proyecto usa `.env` en la raíz y `config/odoo.conf`.
 
 La memoria se guarda por `db_name + user_id + session_id` para evitar cruces entre usuarios, sesiones o bases de datos.
 
+### Variables de RAG
+
+- `RAG_CONTEXT_CHUNKS`: chunks máximos enviados al LLM, por defecto `3`.
+- `RAG_CONTEXT_CHARS`: caracteres máximos por chunk, por defecto `500`.
+- `RAG_MAX_COMPLETION_TOKENS`: límite de salida para respuestas RAG, por defecto `220`.
+
+Estos límites reducen latencia y costo manteniendo el retrieval y las fuentes auditables.
+
 ### Variables de evaluación
 
 - `EVAL_ENFORCE_LATENCY`: si es `true`, los casos que superen `max_latency_ms` fallan. Por defecto la latencia se reporta como warning para evitar flakiness del proveedor LLM/RAG.
 - `AI_EVAL_DB_NAME` / `EVAL_ODOO_DB`: nombre de base usado para aislar memoria en evals reales.
+
+### Observabilidad
+
+`/v1/ask` devuelve `observability` con:
+
+- `tool_trace`
+- `tool_latencies`
+- `memory_latency_ms`
+- `rag_latency_ms`
+
+Los logs usan eventos JSON `OBS_EVENT` con `trace_id` para correlacionar request, memoria, tools y RAG.
 
 ---
 

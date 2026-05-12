@@ -16,6 +16,8 @@ services:
       - AI_REQUIRE_SERVICE_TOKEN=${AI_REQUIRE_SERVICE_TOKEN:-true}
       - AI_SERVICE_TOKEN=${ODOO_AI_TOKEN}
       - AI_SERVICE_URL=${AI_SERVICE_URL:-http://ai_service:8000/v1/ask}
+      - AI_ENFORCE_RBAC=${AI_ENFORCE_RBAC:-false}
+      - AI_RATE_LIMIT_PER_MINUTE=${AI_RATE_LIMIT_PER_MINUTE:-60}
   db:
     container_name: ${PG_CONTAINER_NAME}
     image: postgres:${PG_VERSION}

@@ -230,14 +230,28 @@ MEMORY_DATABASE_URL=postgresql://user:password@host:5432/dbname
 
 Por defecto se usa `in_memory` para desarrollo y CI. Para producción, `postgres` guarda la memoria por `db_name + user_id + session_id`, con TTL y sanitización de campos sensibles.
 
+Seguridad del addon Odoo:
+
+```env
+AI_ENFORCE_RBAC=false
+AI_RATE_LIMIT_PER_MINUTE=60
+```
+
+Con `AI_ENFORCE_RBAC=true`, el addon valida grupos del Copilot antes de enviar preguntas al AI Service. El rate limit es por usuario/sesión y está pensado como control básico local; en despliegues multi-instancia debería moverse a Redis o un gateway.
+
 Variables para RAG:
 
 ```env
 KNOWLEDGE_DATABASE_URL=postgresql://odoo:odoo@db_knowledge:5432/knowledge_db
 TOP_K=5
 SIMILARITY_THRESHOLD=0.70
+RAG_CONTEXT_CHUNKS=3
+RAG_CONTEXT_CHARS=500
+RAG_MAX_COMPLETION_TOKENS=220
 MAX_UPLOAD_SIZE_MB=10
 ```
+
+`RAG_CONTEXT_*` limita el contexto enviado al LLM para mantener latencia y costo bajo control sin perder las fuentes recuperadas.
 
 ## Endpoints
 
@@ -510,6 +524,17 @@ La memoria de conversación puede vivir en el AI Service, no solo en el payload 
 - Fallback seguro: si el store falla, el orquestador sigue respondiendo sin memoria persistida.
 - El addon Odoo envía `db_name` y contexto de seguridad para aislar memoria por base y usuario.
 
+### Observability And Audit
+
+El sistema emite logs JSON estructurados y devuelve breakdown de observabilidad en `/v1/ask`:
+
+- `tool_trace`: latencia, tamaño de resultado, éxito/error por tool.
+- `memory_latency_ms`: tiempos de carga y guardado de memoria.
+- `rag_latency_ms`: tiempo total, retrieval y generación LLM.
+- `trace_id`: correlación entre Odoo, AI Service, tool calls y RAG.
+
+Odoo persiste cada ejecución ORM del bridge en `ai.tool.audit.log`, con `trace_id`, usuario, base, modelo, operación, dominio, campos, límite, latencia, estado y muestra sanitizada del resultado.
+
 ## CI/CD
 
 El repo incluye GitHub Actions en `.github/workflows/ci.yml`.
@@ -528,6 +553,15 @@ Eval real manual:
 ```text
 .github/workflows/eval-real.yml
 ```
+
+Publicación y release:
+
+```text
+.github/workflows/docker-publish.yml
+.github/workflows/release.yml
+```
+
+`docker-publish.yml` publica la imagen del AI Service en GHCR para tags `v*.*.*` o ejecución manual. `release.yml` crea releases manuales con versionado semántico.
 
 Este workflow se ejecuta con `workflow_dispatch` porque levanta Odoo, pgvector, AI Service y llama al proveedor LLM real. Requiere configurar estos secrets en GitHub:
 

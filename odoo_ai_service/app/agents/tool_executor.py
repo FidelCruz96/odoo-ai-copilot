@@ -5,7 +5,7 @@ from time import perf_counter
 from typing import Any
 
 from app.agents.types import AgentContext, Entity, ToolArguments, ToolExecutionResult, ToolStep
-from app.observability import emit_event
+from app.observability import emit_event, result_size
 from app.tools.knowledge_tools import run_search_knowledge
 from app.tools.odoo_tools import query_odoo_count, query_odoo_group, query_odoo_read, query_odoo_search
 
@@ -98,9 +98,30 @@ def _failure_result(
     return payload
 
 
+def _tool_observability(tool_name: str | None, arguments: ToolArguments, result: Any, latency_ms: float) -> dict[str, Any]:
+    row = {
+        "tool": tool_name,
+        "model": arguments.get("model"),
+        "operation": arguments.get("operation"),
+        "latency_ms": latency_ms,
+        "result_size": result_size(result),
+        "success": not (isinstance(result, dict) and result.get("error")),
+        "error_type": result.get("error") if isinstance(result, dict) else None,
+    }
+    if tool_name == "search_knowledge" and isinstance(result, dict):
+        row.update({
+            "retrieval_ms": result.get("retrieval_ms"),
+            "llm_ms": result.get("llm_ms"),
+            "sources_count": len(result.get("sources") or []),
+            "tokens_used": result.get("tokens_used"),
+        })
+    return row
+
+
 def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: AgentContext | dict | None = None) -> ToolExecutionResult:
     tools_used: list[str] = []
     results: list[dict] = []
+    tool_trace: list[dict[str, Any]] = []
     previous_result: Any = None
     partial_failure = False
     trace_id = _trace_id_from_context(context)
@@ -160,18 +181,25 @@ def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: Ag
                 trace_id=trace_id,
             )
         tools_used.append(tool_name)
-        results.append({"tool": tool_name, "args": _public_arguments(arguments), "result": result})
-        previous_result = result
         latency_ms = round((perf_counter() - tool_started_at) * 1000, 2)
+        trace_row = _tool_observability(tool_name, arguments, result, latency_ms)
+        results.append({"tool": tool_name, "args": _public_arguments(arguments), "result": result, "latency_ms": latency_ms})
+        tool_trace.append(trace_row)
+        previous_result = result
         emit_event(
             logger,
             "TOOL_EXECUTED",
             trace_id=trace_id,
             tool=tool_name,
             model=arguments.get("model"),
+            operation=arguments.get("operation"),
             latency_ms=latency_ms,
+            result_size=trace_row.get("result_size"),
             success=not (isinstance(result, dict) and result.get("error")),
             error_type=result.get("error") if isinstance(result, dict) else None,
+            retrieval_ms=trace_row.get("retrieval_ms"),
+            llm_ms=trace_row.get("llm_ms"),
+            tokens_used=trace_row.get("tokens_used"),
         )
 
         if isinstance(result, dict) and result.get("error"):
@@ -199,6 +227,7 @@ def execute_plan(plan: list[ToolStep], entity: Entity | None = None, context: Ag
         "success": True,
         "tools_used": tools_used,
         "results": results,
+        "tool_trace": tool_trace,
         "partial_failure": partial_failure,
     }
     if trace_id:

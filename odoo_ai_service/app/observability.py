@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
+from time import perf_counter
 from typing import Any
 
 
@@ -38,3 +40,23 @@ def emit_event(logger: logging.Logger, event: str, **payload: Any) -> None:
             default=str,
         ),
     )
+
+
+def result_size(result: Any) -> int | None:
+    if isinstance(result, list):
+        return len(result)
+    if isinstance(result, dict):
+        if isinstance(result.get("sources"), list):
+            return len(result.get("sources") or [])
+        if isinstance(result.get("results"), list):
+            return len(result.get("results") or [])
+        return len(result)
+    if result is None:
+        return 0
+    return 1
+
+
+@contextmanager
+def timed_span():
+    started_at = perf_counter()
+    yield lambda: round((perf_counter() - started_at) * 1000, 2)

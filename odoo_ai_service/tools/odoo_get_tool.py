@@ -61,6 +61,9 @@ def _build_access_context(context):
     clean = dict(access_context)
     if context.get("request_id") and not clean.get("request_id"):
         clean["request_id"] = context.get("request_id")
+    for key in ("session_id", "route", "route_selected", "intent", "intent_detected", "domain", "domain_detected", "db_name"):
+        if context.get(key) and not clean.get(key):
+            clean[key] = context.get(key)
     return clean
 
 

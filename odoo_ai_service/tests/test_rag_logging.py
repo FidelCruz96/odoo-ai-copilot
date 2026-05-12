@@ -70,6 +70,23 @@ class DummyVectorService:
         ]
 
 
+class DummyChatCompletions:
+    def __init__(self):
+        self.kwargs = None
+
+    def create(self, **kwargs):
+        self.kwargs = kwargs
+        message = types.SimpleNamespace(content="Respuesta breve con evidencia.")
+        choice = types.SimpleNamespace(message=message)
+        usage = types.SimpleNamespace(total_tokens=42)
+        return types.SimpleNamespace(choices=[choice], usage=usage)
+
+
+class DummyOpenAIClient:
+    def __init__(self):
+        self.chat = types.SimpleNamespace(completions=DummyChatCompletions())
+
+
 class TestRagLogging(unittest.TestCase):
     def test_rag_query_end_logs_top_score_and_raw_scores(self):
         settings = Settings(
@@ -101,6 +118,37 @@ class TestRagLogging(unittest.TestCase):
         self.assertEqual(payload["filtered_chunks"], 1)
         self.assertEqual(payload["top_score"], 0.63)
         self.assertEqual(payload["raw_scores"], [0.63, 0.41])
+
+    def test_rag_llm_prompt_limits_context_and_completion_tokens(self):
+        client = DummyOpenAIClient()
+        settings = Settings(
+            openai_api_key="test-key",
+            rag_context_chunks=2,
+            rag_context_chars=20,
+            rag_max_completion_tokens=123,
+        )
+        service = RagService(
+            settings=settings,
+            embedding_service=DummyEmbeddingService(),
+            vector_service=DummyVectorService(),
+            client=client,
+        )
+        chunks = [
+            {"doc_name": "a.md", "page": 1, "score": 0.9, "content": "A" * 80},
+            {"doc_name": "b.md", "page": 2, "score": 0.8, "content": "B" * 80},
+            {"doc_name": "c.md", "page": 3, "score": 0.7, "content": "C" * 80},
+        ]
+
+        result = service._generate_answer("pregunta", chunks)
+
+        kwargs = client.chat.completions.kwargs
+        user_content = kwargs["messages"][1]["content"]
+        self.assertEqual(result["tokens_used"], 42)
+        self.assertEqual(kwargs["max_completion_tokens"], 123)
+        self.assertIn("A" * 20, user_content)
+        self.assertIn("B" * 20, user_content)
+        self.assertNotIn("C" * 20, user_content)
+        self.assertNotIn("A" * 21, user_content)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,10 @@ class QueryResponse(BaseModel):
     sources: list[SourceItem]
     tokens_used: int | None = None
     latency_ms: float
+    retrieval_ms: float | None = None
+    llm_ms: float | None = None
+    raw_chunks: int | None = None
+    filtered_chunks: int | None = None
     trace_id: str
 
 

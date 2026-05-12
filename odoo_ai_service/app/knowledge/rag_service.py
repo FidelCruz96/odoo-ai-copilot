@@ -43,18 +43,23 @@ class RagService:
                 ensure_ascii=False,
             ),
         )
+        retrieval_started_at = perf_counter()
         query_embedding = self.embedding_service.embed_query(query_request.query)
         raw_chunks = self.vector_service.search(
             query_embedding=query_embedding,
             top_k=query_request.top_k or self.settings.top_k,
             filters=query_request.filters,
         )
+        retrieval_ms = round((perf_counter() - retrieval_started_at) * 1000, 2)
         raw_scores = [round(float(chunk.get("score", 0.0)), 4) for chunk in raw_chunks[:5]]
         filtered_chunks = [
             chunk for chunk in raw_chunks if float(chunk.get("score", 0.0)) >= self.settings.similarity_threshold
         ]
+        llm_ms = 0.0
         if filtered_chunks:
+            llm_started_at = perf_counter()
             llm_result = self._generate_answer(query_request.query, filtered_chunks)
+            llm_ms = round((perf_counter() - llm_started_at) * 1000, 2)
             answer = llm_result["answer"]
             tokens_used = llm_result["tokens_used"]
         else:
@@ -81,6 +86,8 @@ class RagService:
                     "filtered_chunks": len(filtered_chunks),
                     "sources_count": len(sources),
                     "latency_ms": latency_ms,
+                    "retrieval_ms": retrieval_ms,
+                    "llm_ms": llm_ms,
                     "tokens_used": tokens_used,
                 },
                 ensure_ascii=False,
@@ -91,21 +98,20 @@ class RagService:
             sources=sources,
             tokens_used=tokens_used,
             latency_ms=latency_ms,
+            retrieval_ms=retrieval_ms,
+            llm_ms=llm_ms,
+            raw_chunks=len(raw_chunks),
+            filtered_chunks=len(filtered_chunks),
             trace_id=trace_id,
         )
 
     def _generate_answer(self, query: str, chunks: list[dict]) -> dict:
+        context = self._build_context(chunks)
         if not self.settings.openai_api_key:
-            joined_context = "\n\n".join(chunk.get("content", "") for chunk in chunks[:3])
             return {
-                "answer": f"Contexto recuperado:\n{joined_context[:1200]}",
+                "answer": f"Contexto recuperado:\n{context[:1200]}",
                 "tokens_used": None,
             }
-        context = "\n\n".join(
-            f"[{chunk.get('doc_name')} p.{chunk.get('page') or '-'} score={round(float(chunk.get('score', 0.0)), 2)}]\n"
-            f"{chunk.get('content', '')}"
-            for chunk in chunks[:5]
-        )
         response = self.client.chat.completions.create(
             model=self.settings.ai_model,
             messages=[
@@ -113,7 +119,8 @@ class RagService:
                     "role": "system",
                     "content": (
                         "Responde solo con base en el contexto recuperado. "
-                        "Si falta evidencia suficiente, dilo explícitamente."
+                        "Si falta evidencia suficiente, dilo explícitamente. "
+                        "Sé breve: máximo 4 viñetas o 120 palabras."
                     ),
                 },
                 {
@@ -121,12 +128,24 @@ class RagService:
                     "content": f"Pregunta:\n{query}\n\nContexto:\n{context}",
                 },
             ],
-            max_completion_tokens=400,
+            max_completion_tokens=self.settings.rag_max_completion_tokens,
         )
         choice = response.choices[0]
         content = choice.message.content or "No se pudo generar una respuesta con el contexto recuperado."
         tokens_used = getattr(getattr(response, "usage", None), "total_tokens", None)
         return {"answer": content, "tokens_used": tokens_used}
+
+    def _build_context(self, chunks: list[dict]) -> str:
+        max_chunks = max(1, self.settings.rag_context_chunks)
+        max_chars = max(1, self.settings.rag_context_chars)
+        parts = []
+        for chunk in chunks[:max_chunks]:
+            content = str(chunk.get("content", ""))[:max_chars]
+            parts.append(
+                f"[{chunk.get('doc_name')} p.{chunk.get('page') or '-'} score={round(float(chunk.get('score', 0.0)), 2)}]\n"
+                f"{content}"
+            )
+        return "\n\n".join(parts)
 
 
 def get_rag_service() -> RagService:

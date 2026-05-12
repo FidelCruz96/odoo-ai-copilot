@@ -141,11 +141,13 @@ def _memory_from_success(
     intent: str | None,
     domain: str | None,
     question: str,
+    trace_id: str,
     tools_used: list[str],
     record: dict[str, Any] | None,
     entity: Entity | None,
     knowledge_result: KnowledgeResult | None,
-) -> tuple[dict[str, Any], bool]:
+) -> tuple[dict[str, Any], bool, float]:
+    save_started_at = perf_counter()
     base = existing_memory or ConversationMemory(session_id=session_id)
     base.session_id = session_id
     base.user_id = user_id
@@ -175,9 +177,11 @@ def _memory_from_success(
     base.last_question = question
     base.last_tools_used = list(tools_used or [])
     base.last_sources = [source.get("doc_name") for source in (knowledge_result or {}).get("sources", [])]
+    base.metadata = {**(base.metadata or {}), "trace_id": trace_id}
 
     persist_memory(base, user_id=user_id, db_name=db_name)
-    return base.to_context_dict(), memory_updated
+    save_latency_ms = round((perf_counter() - save_started_at) * 1000, 2)
+    return base.to_context_dict(), memory_updated, save_latency_ms
 
 
 def ask_hybrid_agent(
@@ -207,7 +211,9 @@ def ask_hybrid_agent(
     ):
         domain = "knowledge"
 
+    memory_started_at = perf_counter()
     memory = load_memory(resolved_session_id, base_context)
+    memory_load_ms = round((perf_counter() - memory_started_at) * 1000, 2)
     context_resolution = resolve_context(
         entity,
         memory,
@@ -284,6 +290,13 @@ def ask_hybrid_agent(
         }
 
     plan_entity = active_entity or entity
+    base_context["session_id"] = resolved_session_id
+    base_context["route"] = route
+    base_context["route_selected"] = route
+    base_context["intent"] = intent
+    base_context["intent_detected"] = intent
+    base_context["domain"] = domain
+    base_context["domain_detected"] = domain
     try:
         plan = build_plan(route, domain, intent, plan_entity, question=normalized_question)
     except RuntimeError as exc:
@@ -414,7 +427,7 @@ def ask_hybrid_agent(
         grounded = False
         response_faithful = False
 
-    response_memory, memory_updated = _memory_from_success(
+    response_memory, memory_updated, memory_save_ms = _memory_from_success(
         session_id=resolved_session_id,
         user_id=scoped_user_id,
         db_name=scoped_db_name,
@@ -423,6 +436,7 @@ def ask_hybrid_agent(
         intent=intent,
         domain=domain,
         question=normalized_question,
+        trace_id=trace_id,
         tools_used=tools_used,
         record=primary_record if grounded or route == ERP_DATA else None,
         entity=plan_entity,
@@ -431,6 +445,25 @@ def ask_hybrid_agent(
 
     latency_ms = round((perf_counter() - started_at) * 1000, 2)
     tokens_used = int((knowledge_result or {}).get("tokens_used") or 0)
+    tool_trace = execution_result.get("tool_trace") or []
+    tool_latencies = {
+        str(row.get("tool")): row.get("latency_ms")
+        for row in tool_trace
+        if isinstance(row, dict) and row.get("tool")
+    }
+    observability = {
+        "tool_trace": tool_trace,
+        "tool_latencies": tool_latencies,
+        "memory_latency_ms": {
+            "load": memory_load_ms,
+            "save": memory_save_ms,
+        },
+        "rag_latency_ms": {
+            "total": (knowledge_result or {}).get("latency_ms"),
+            "retrieval": (knowledge_result or {}).get("retrieval_ms"),
+            "llm": (knowledge_result or {}).get("llm_ms"),
+        } if knowledge_result else {},
+    }
     odoo_evidence = [
         {
             "tool": row.get("tool"),
@@ -481,6 +514,8 @@ def ask_hybrid_agent(
         "answer_mode": route,
         "partial_failure": bool(execution_result.get("partial_failure")),
         "error_type": execution_result.get("error_type"),
+        "observability": observability,
+        "metadata": observability,
         "metrics": metrics,
         "erp_result": {
             "success": execution_result.get("success"),

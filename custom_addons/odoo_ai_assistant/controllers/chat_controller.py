@@ -6,6 +6,7 @@ import logging
 import json
 import uuid
 from datetime import date, timedelta
+from time import perf_counter
 import requests
 from requests.exceptions import RequestException
 from odoo import http
@@ -69,6 +70,9 @@ AI_MAX_FIELDS = _env_int("AI_MAX_FIELDS", 50, min_value=1)
 AI_MAX_DOMAIN_CLAUSES = _env_int("AI_MAX_DOMAIN_CLAUSES", 40, min_value=1)
 AI_MAX_SCHEMA_MODELS = _env_int("AI_MAX_SCHEMA_MODELS", 25, min_value=1)
 AI_RETURN_ERROR_DETAILS = _env_bool("AI_RETURN_ERROR_DETAILS", False)
+AI_ENFORCE_RBAC = _env_bool("AI_ENFORCE_RBAC", False)
+AI_RATE_LIMIT_PER_MINUTE = _env_int("AI_RATE_LIMIT_PER_MINUTE", 60, min_value=1)
+_AI_RATE_LIMIT_BUCKETS = {}
 FIELD_PATH_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")
 AGG_FIELD_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*:(sum|avg|min|max|count)$")
 
@@ -402,6 +406,10 @@ def _resolve_ai_user_scope(params):
         "active_company_id": active_company_id,
         "groups_hash": access_context.get("groups_hash"),
         "request_id": access_context.get("request_id") or params.get("request_id"),
+        "session_id": access_context.get("session_id") or params.get("session_id"),
+        "route": access_context.get("route_selected") or access_context.get("route"),
+        "intent": access_context.get("intent_detected") or access_context.get("intent"),
+        "domain_detected": access_context.get("domain_detected") or access_context.get("domain"),
     }
 
 
@@ -422,23 +430,75 @@ def _result_count(result):
     return 1
 
 
-def _log_ai_tool_audit(status, audit_context, model, operation, domain=None, fields=None, result=None, error_code=None):
+def _sanitize_audit_payload(value, max_items=3):
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            normalized = str(key).lower()
+            if normalized in AI_BLOCKED_FIELDS or normalized in {"password", "token", "secret", "api_key", "access_token"}:
+                continue
+            clean[key] = _sanitize_audit_payload(item, max_items=max_items)
+        return clean
+    if isinstance(value, list):
+        return [_sanitize_audit_payload(item, max_items=max_items) for item in value[:max_items]]
+    if isinstance(value, str) and len(value) > 200:
+        return value[:200] + "...[truncated]"
+    return value
+
+
+def _audit_json(value):
+    return json.dumps(_sanitize_audit_payload(value), ensure_ascii=False, default=str)
+
+
+def _log_ai_tool_audit(status, audit_context, model, operation, domain=None, fields=None, result=None, error_code=None, latency_ms=None, limit=None):
     audit_context = audit_context or {}
+    success = status == "ok"
     payload = {
         "status": status,
         "request_id": audit_context.get("request_id"),
+        "session_id": audit_context.get("session_id"),
+        "db_name": request.env.cr.dbname,
         "uid": audit_context.get("uid"),
         "company_ids": audit_context.get("company_ids"),
         "active_company_id": audit_context.get("active_company_id"),
         "groups_hash": audit_context.get("groups_hash"),
+        "route": audit_context.get("route"),
+        "intent": audit_context.get("intent"),
+        "domain_detected": audit_context.get("domain_detected"),
         "model": model,
         "operation": operation,
         "domain": domain or [],
         "fields": fields or [],
+        "limit": limit,
         "record_count": _result_count(result),
+        "latency_ms": latency_ms,
         "error_code": error_code,
     }
     _logger.info("AI_TOOL_AUDIT %s", json.dumps(payload, ensure_ascii=False))
+    try:
+        with request.env.cr.savepoint():
+            request.env["ai.tool.audit.log"].sudo().create({
+                "trace_id": audit_context.get("request_id"),
+                "session_id": audit_context.get("session_id"),
+                "db_name": request.env.cr.dbname,
+                "user_id": audit_context.get("uid") or False,
+                "route": audit_context.get("route"),
+                "intent": audit_context.get("intent"),
+                "domain": audit_context.get("domain_detected"),
+                "tool_name": "schema" if operation == "schema" else "query_odoo",
+                "model_name": model,
+                "operation": operation,
+                "domain_filter": _audit_json(domain or []),
+                "fields_json": _audit_json(fields or []),
+                "limit": limit or 0,
+                "success": success,
+                "error_type": error_code,
+                "latency_ms": latency_ms or 0.0,
+                "result_count": _result_count(result),
+                "result_sample": _audit_json(result),
+            })
+    except Exception:
+        _logger.exception("AI persistent audit log failed")
 
 
 def _require_service_token():
@@ -467,6 +527,48 @@ def _ai_service_headers():
     if not AI_SERVICE_TOKEN:
         return {}
     return {"X-AI-Service-Token": AI_SERVICE_TOKEN}
+
+
+def _rbac_allowed(user, group_xmlid):
+    if not AI_ENFORCE_RBAC:
+        return True
+    return user.has_group("base.group_system") or user.has_group(group_xmlid)
+
+
+def _question_needs_knowledge(question):
+    value = str(question or "").lower()
+    return any(token in value for token in ("politica", "proceso", "documentacion", "segun", "cumple", "aprobacion"))
+
+
+def _rate_limit_key(user_id, session_key):
+    minute = int(perf_counter() // 60)
+    return user_id, session_key or "global", minute
+
+
+def _check_ai_rate_limit(user_id, session_key):
+    key = _rate_limit_key(user_id, session_key)
+    current = _AI_RATE_LIMIT_BUCKETS.get(key, 0) + 1
+    _AI_RATE_LIMIT_BUCKETS[key] = current
+    if len(_AI_RATE_LIMIT_BUCKETS) > 5000:
+        current_minute = key[2]
+        stale_keys = [bucket for bucket in _AI_RATE_LIMIT_BUCKETS if bucket[2] < current_minute]
+        for bucket in stale_keys[:1000]:
+            _AI_RATE_LIMIT_BUCKETS.pop(bucket, None)
+    return current <= AI_RATE_LIMIT_PER_MINUTE
+
+
+def _ai_access_error(error_code, message):
+    return {
+        "answer": message,
+        "answer_mode": "security",
+        "answer_type": "error",
+        "needs_clarification": False,
+        "clarification_options": [],
+        "actions": [],
+        "metadata": {"latency_ms": None, "tools_used": [], "context_scope": {}},
+        "error_code": error_code,
+        "ui": None,
+    }
 
 
 def _hash_groups(group_xmlids):
@@ -714,7 +816,7 @@ def _resolve_navigation_for_model(model_name, open_type="list"):
     }
 
 
-def _normalize_ai_response_payload(result, answer, request_id, currency_meta):
+def _normalize_ai_response_payload(result, answer, request_id, currency_meta, can_view_evidence=True):
     result = result if isinstance(result, dict) else {}
     metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
     metadata = dict(result.get("metadata") or {})
@@ -732,13 +834,19 @@ def _normalize_ai_response_payload(result, answer, request_id, currency_meta):
     if active_id:
         context_scope["active_id"] = active_id
 
+    sources = result.get("sources") or metadata.get("sources") or []
+    odoo_evidence = result.get("odoo_evidence") or metadata.get("odoo_evidence") or []
+    if not can_view_evidence:
+        sources = []
+        odoo_evidence = []
+
     metadata.update({
         "route_selected": route,
         "intent_detected": result.get("intent_detected") or metrics.get("intent_detected"),
         "domain_detected": result.get("domain_detected") or metrics.get("domain_detected"),
         "tools_used": tools_used,
-        "sources": result.get("sources") or metadata.get("sources") or [],
-        "odoo_evidence": result.get("odoo_evidence") or metadata.get("odoo_evidence") or [],
+        "sources": sources,
+        "odoo_evidence": odoo_evidence,
         "latency_ms": latency_ms,
         "tokens_used": tokens_used,
         "context_scope": context_scope,
@@ -759,8 +867,8 @@ def _normalize_ai_response_payload(result, answer, request_id, currency_meta):
         "error_code": result.get("error_code") or result.get("error_type"),
         "request_id": result.get("request_id") or result.get("trace_id") or request_id,
         "ui": result.get("ui"),
-        "sources": result.get("sources") or [],
-        "odoo_evidence": result.get("odoo_evidence") or [],
+        "sources": sources,
+        "odoo_evidence": odoo_evidence,
         "metrics": metrics,
     }
 
@@ -776,10 +884,23 @@ class AIChatController(http.Controller):
             json.dumps({"request_id": request_id, "question": question}, ensure_ascii=False),
         )
         user = request.env.user
+        if not _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_user"):
+            payload = _ai_access_error("ERR_AI_COPILOT_FORBIDDEN", "No tienes permisos para usar el copiloto de IA.")
+            payload["request_id"] = request_id
+            return payload
+        session_key = _get_session_key(context or {})
+        if not _check_ai_rate_limit(user.id, session_key):
+            payload = _ai_access_error("ERR_RATE_LIMITED", "Has alcanzado el límite de consultas del copiloto. Intenta nuevamente en un minuto.")
+            payload["request_id"] = request_id
+            return payload
+        if _question_needs_knowledge(question) and not _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_knowledge"):
+            payload = _ai_access_error("ERR_KNOWLEDGE_FORBIDDEN", "No tienes permisos para consultar documentación Knowledge/RAG.")
+            payload["request_id"] = request_id
+            return payload
+        can_view_evidence = _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_evidence")
         company = request.env.company
         ctx = request.context or {}
         access_context = _access_context_for_user(user, company, ctx)
-        session_key = _get_session_key(context or {})
         memory = _get_session_memory(user.id, session_key)
         history = []
         history_limit, use_server_history = _get_history_settings()
@@ -861,7 +982,7 @@ class AIChatController(http.Controller):
             "answer": answer
         })
 
-        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta)
+        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta, can_view_evidence=can_view_evidence)
         _logger.info(
             "AI_ASK_JSON_END %s",
             json.dumps(
@@ -891,10 +1012,23 @@ class AIChatController(http.Controller):
             json.dumps({"request_id": request_id, "question": question}, ensure_ascii=False),
         )
         user = request.env.user
+        session_key = _get_session_key(client_context)
+        if not _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_user"):
+            payload = _ai_access_error("ERR_AI_COPILOT_FORBIDDEN", "No tienes permisos para usar el copiloto de IA.")
+            payload["request_id"] = request_id
+            return request.make_json_response(payload, status=403)
+        if not _check_ai_rate_limit(user.id, session_key):
+            payload = _ai_access_error("ERR_RATE_LIMITED", "Has alcanzado el límite de consultas del copiloto. Intenta nuevamente en un minuto.")
+            payload["request_id"] = request_id
+            return request.make_json_response(payload, status=429)
+        if _question_needs_knowledge(question) and not _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_knowledge"):
+            payload = _ai_access_error("ERR_KNOWLEDGE_FORBIDDEN", "No tienes permisos para consultar documentación Knowledge/RAG.")
+            payload["request_id"] = request_id
+            return request.make_json_response(payload, status=403)
+        can_view_evidence = _rbac_allowed(user, "odoo_ai_assistant.group_ai_copilot_evidence")
         company = request.env.company
         ctx = request.context or {}
         access_context = _access_context_for_user(user, company, ctx)
-        session_key = _get_session_key(client_context)
         memory = _get_session_memory(user.id, session_key)
         history = []
         history_limit, use_server_history = _get_history_settings()
@@ -977,7 +1111,7 @@ class AIChatController(http.Controller):
             "answer": answer
         })
 
-        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta)
+        response_payload = _normalize_ai_response_payload(result, answer, request_id, currency_meta, can_view_evidence=can_view_evidence)
         _logger.info(
             "AI_ASK_HTTP_END %s",
             json.dumps(
@@ -1046,6 +1180,7 @@ class AIController(http.Controller):
         groupby = params.get("groupby") or []
         orderby = params.get("orderby")
         audit_context = None
+        started_at = perf_counter()
 
         try:
             model = _validate_model_name(model)
@@ -1086,19 +1221,23 @@ class AIController(http.Controller):
             else:
                 return _error_response("ERR_OPERATION_NOT_ALLOWED", "Operación no permitida.", status=403)
 
-            _log_ai_tool_audit("ok", audit_context, model, operation, domain=domain, fields=fields, result=result)
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("ok", audit_context, model, operation, domain=domain, fields=fields, result=result, latency_ms=latency_ms, limit=limit)
             return request.make_json_response(result)
         except (PermissionError, AccessError) as e:
             _logger.warning("AI query blocked: %s", e)
-            _log_ai_tool_audit("blocked", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e))
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("blocked", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e), latency_ms=latency_ms)
             return _error_response("ERR_PERMISSION_DENIED", "Consulta bloqueada por política de seguridad.", status=403, details=e)
         except ValueError as e:
             _logger.warning("AI query validation error: %s", e)
-            _log_ai_tool_audit("invalid", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e))
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("invalid", audit_context, model, operation, domain=domain, fields=fields, error_code=str(e), latency_ms=latency_ms)
             return _error_response("ERR_INVALID_QUERY", "Parámetros de consulta inválidos.", status=400, details=e)
         except Exception as e:
             _logger.exception("AI query error")
-            _log_ai_tool_audit("error", audit_context, model, operation, domain=domain, fields=fields, error_code=type(e).__name__)
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("error", audit_context, model, operation, domain=domain, fields=fields, error_code=type(e).__name__, latency_ms=latency_ms)
             return _error_response("ERR_QUERY_EXECUTION", "No se pudo ejecutar la consulta.", status=500, details=e)
 
     @http.route("/ai/schema", type="http", auth="public", csrf=False, methods=["GET", "POST"])
@@ -1112,6 +1251,7 @@ class AIController(http.Controller):
         force = bool(params.get("force")) if isinstance(params, dict) else False
         models_filter = params.get("models") if isinstance(params, dict) else None
         audit_context = None
+        started_at = perf_counter()
 
         if models_filter is None:
             models_filter = sorted(AI_ALLOWED_MODELS)
@@ -1149,13 +1289,16 @@ class AIController(http.Controller):
                 force=force,
                 models_filter=accessible_models,
             )
-            _log_ai_tool_audit("ok", audit_context, "schema", "schema", fields=accessible_models, result=schema)
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("ok", audit_context, "schema", "schema", fields=accessible_models, result=schema, latency_ms=latency_ms)
             return request.make_json_response(_sanitize_schema_payload(schema))
         except (PermissionError, AccessError) as e:
             _logger.warning("AI schema blocked: %s", e)
-            _log_ai_tool_audit("blocked", audit_context, "schema", "schema", fields=clean_models, error_code=str(e))
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("blocked", audit_context, "schema", "schema", fields=clean_models, error_code=str(e), latency_ms=latency_ms)
             return _error_response("ERR_PERMISSION_DENIED", "Consulta bloqueada por política de seguridad.", status=403, details=e)
         except Exception as e:
             _logger.exception("AI schema error")
-            _log_ai_tool_audit("error", audit_context, "schema", "schema", fields=clean_models, error_code=type(e).__name__)
+            latency_ms = round((perf_counter() - started_at) * 1000, 2)
+            _log_ai_tool_audit("error", audit_context, "schema", "schema", fields=clean_models, error_code=type(e).__name__, latency_ms=latency_ms)
             return _error_response("ERR_SCHEMA_EXECUTION", "No se pudo obtener schema.", status=500, details=e)

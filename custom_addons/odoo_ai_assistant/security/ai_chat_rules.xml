@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
+    <record id="group_ai_copilot_user" model="res.groups">
+        <field name="name">AI Copilot User</field>
+        <field name="category_id" ref="base.module_category_hidden"/>
+    </record>
+
+    <record id="group_ai_copilot_knowledge" model="res.groups">
+        <field name="name">AI Copilot Knowledge</field>
+        <field name="category_id" ref="base.module_category_hidden"/>
+    </record>
+
+    <record id="group_ai_copilot_evidence" model="res.groups">
+        <field name="name">AI Copilot Evidence Viewer</field>
+        <field name="category_id" ref="base.module_category_hidden"/>
+    </record>
+
     <record id="rule_ai_chat_own" model="ir.rule">
         <field name="name">AI Chat: User</field>
         <field name="model_id" ref="odoo_ai_assistant.model_ai_chat"/>

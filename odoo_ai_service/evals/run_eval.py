@@ -107,6 +107,7 @@ def evaluate_case(case: dict[str, Any], response: dict[str, Any], *, enforce_lat
         "tools": actual_tools,
         "latency_ms": response.get("latency_ms"),
         "tokens_used": response.get("tokens_used"),
+        "observability": response.get("observability") or response.get("metadata") or {},
         "grounded": response.get("grounded"),
         "response_faithful": response.get("response_faithful"),
         "error_type": response.get("error_type") or response.get("error_code"),

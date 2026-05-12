@@ -121,6 +121,29 @@ class TestAppToolExecutorMessages(unittest.TestCase):
         self.assertEqual(result["trace_id"], "req-fail")
         self.assertIn("Trace ID: req-fail", result["message"])
 
+    def test_tool_trace_includes_latency_and_result_size(self):
+        plan = [{"tool": "search_knowledge", "args": {"query": "politica", "top_k": 3}}]
+        registry = dict(tool_executor.TOOL_REGISTRY)
+
+        registry["search_knowledge"] = lambda **kwargs: {
+            "answer": "ok",
+            "sources": [{"doc_name": "policy.md"}],
+            "tokens_used": 12,
+            "latency_ms": 100.0,
+            "retrieval_ms": 10.0,
+            "llm_ms": 90.0,
+        }
+
+        with patch.object(tool_executor, "TOOL_REGISTRY", registry):
+            result = tool_executor.execute_plan(plan, context={"request_id": "req-trace"})
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["tool_trace"][0]["tool"], "search_knowledge")
+        self.assertEqual(result["tool_trace"][0]["result_size"], 1)
+        self.assertEqual(result["tool_trace"][0]["retrieval_ms"], 10.0)
+        self.assertEqual(result["tool_trace"][0]["llm_ms"], 90.0)
+        self.assertIsInstance(result["results"][0]["latency_ms"], float)
+
 
 if __name__ == "__main__":
     unittest.main()
