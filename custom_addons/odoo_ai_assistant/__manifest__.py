@@ -6,7 +6,7 @@
     "author": "Fidel Cruz",
     "website": "",
     "license": "LGPL-3",
-    "depends": ['base', 'web', 'account', 'purchase', 'stock', 'sale'],
+    "depends": ['base', 'web', 'account', 'purchase', 'stock', 'sale_management'],
     "data": [
         "security/ir.model.access.csv",
         "security/ai_chat_rules.xml",
