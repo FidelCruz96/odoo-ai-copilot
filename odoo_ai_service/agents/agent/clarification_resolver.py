@@ -138,6 +138,61 @@ def _should_clarify_count_vs_list(text: str) -> bool:
     return True
 
 
+def _should_clarify_period_metric(text: str) -> bool:
+    if not text:
+        return False
+    business_terms = [
+        "venta",
+        "ventas",
+        "compra",
+        "compras",
+        "facturacion",
+        "facturación",
+        "factura",
+        "facturas",
+    ]
+    period_terms = [
+        "del mes",
+        "este mes",
+        "mes actual",
+        "del periodo",
+        "del período",
+        "este periodo",
+        "este período",
+    ]
+    explicit_metric_terms = [
+        "cuantos",
+        "cuántos",
+        "cuantas",
+        "cuántas",
+        "cantidad",
+        "numero",
+        "número",
+        "monto",
+        "importe",
+        "total vendido",
+        "total comprado",
+        "top",
+        "ranking",
+        "cliente",
+        "clientes",
+        "mas",
+        "más",
+        "mayor",
+        "mayores",
+        "detalle",
+        "lista",
+        "muestra",
+        "muestrame",
+        "muéstrame",
+    ]
+    return (
+        _contains_any(text, business_terms)
+        and _contains_any(text, period_terms)
+        and not _contains_any(text, explicit_metric_terms)
+    )
+
+
 CLARIFICATION_RULES = [
     {
         "name": "sales_vs_invoices_scope",
@@ -232,6 +287,55 @@ CLARIFICATION_RULES = [
                     r"\bmostrar\b",
                     r"\bver\b",
                     r"\bcompleto\b",
+                    r"\btodos\b",
+                ],
+                "rewrite_template": "muéstrame el detalle para: {original_question}",
+            },
+        },
+    },
+    {
+        "name": "period_metric_scope",
+        "match_patterns": [
+            r"\bventas?\b.*\b(?:del|este)\s+mes\b",
+            r"\bcompras?\b.*\b(?:del|este)\s+mes\b",
+            r"\bfacturaci[oó]n\b.*\b(?:del|este)\s+mes\b",
+            r"\bfacturas?\b.*\b(?:del|este)\s+mes\b",
+            r"\b(?:del|este)\s+mes\b.*\bventas?\b",
+            r"\b(?:del|este)\s+mes\b.*\bcompras?\b",
+            r"\b(?:del|este)\s+mes\b.*\bfacturaci[oó]n\b",
+            r"\b(?:del|este)\s+mes\b.*\bfacturas?\b",
+        ],
+        "question": "¿Quieres cantidad, monto total o detalle del período?",
+        "choices": {
+            "count": {
+                "answer_patterns": [
+                    r"\bcantidad\b",
+                    r"\bcuantos\b",
+                    r"\bcuántos\b",
+                    r"\bcuantas\b",
+                    r"\bcuántas\b",
+                    r"\bnumero\b",
+                    r"\bnúmero\b",
+                    r"\bconteo\b",
+                ],
+                "rewrite_template": "cantidad para: {original_question}",
+            },
+            "amount": {
+                "answer_patterns": [
+                    r"\bmonto\b",
+                    r"\bimporte\b",
+                    r"\btotal\b",
+                    r"\bsuma\b",
+                    r"\bacumulado\b",
+                ],
+                "rewrite_template": "monto total para: {original_question}",
+            },
+            "detail": {
+                "answer_patterns": [
+                    r"\bdetalle\b",
+                    r"\blista\b",
+                    r"\bmostrar\b",
+                    r"\bver\b",
                     r"\btodos\b",
                 ],
                 "rewrite_template": "muéstrame el detalle para: {original_question}",
@@ -337,6 +441,8 @@ def detect_clarification_needed(question: str, memory: dict[str, Any] | None) ->
         if rule["name"] == "sales_vs_invoices_scope" and not _should_clarify_sales_vs_invoices(text):
             continue
         if rule["name"] == "count_vs_list_scope" and not _should_clarify_count_vs_list(text):
+            continue
+        if rule["name"] == "period_metric_scope" and not _should_clarify_period_metric(text):
             continue
         if any(re.search(pattern, text) for pattern in rule["match_patterns"]):
             return {

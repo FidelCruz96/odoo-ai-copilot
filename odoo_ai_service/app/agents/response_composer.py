@@ -84,24 +84,42 @@ def compose_ranking_result(rows: list, domain: str | None = None) -> str:
     if not isinstance(rows, list) or not rows:
         return "No encontré registros para construir el ranking."
 
+    document_rows = isinstance(rows[0], dict) and "name" in rows[0] and "amount_total" in rows[0]
     title = "Ranking por monto"
-    if domain == "invoice":
-        title = "Top clientes por facturación"
-    elif domain == "sale":
-        title = "Top clientes por ventas"
-    elif domain == "purchase":
-        title = "Top proveedores por compras"
+    if document_rows:
+        if domain == "invoice":
+            title = "Top facturas por monto"
+        elif domain == "sale":
+            title = "Top ventas por monto"
+        elif domain == "purchase":
+            title = "Top compras por monto"
+    else:
+        if domain == "invoice":
+            title = "Top clientes por facturación"
+        elif domain == "sale":
+            title = "Top clientes por ventas"
+        elif domain == "purchase":
+            title = "Top proveedores por compras"
 
     lines = [f"{title}:"]
     for index, row in enumerate(rows[:5], start=1):
         if not isinstance(row, dict):
             continue
-        partner = row.get("partner_id")
-        if isinstance(partner, (list, tuple)) and len(partner) >= 2:
-            name = partner[1]
+        if document_rows:
+            document = row.get("name") or f"ID {row.get('id')}"
+            partner = row.get("partner_id")
+            if isinstance(partner, (list, tuple)) and len(partner) >= 2:
+                name = f"{document} - {partner[1]}"
+            else:
+                name = str(document)
+            amount = row.get("amount_total", 0.0)
         else:
-            name = str(partner or "Sin contacto")
-        amount = row.get("amount_total", row.get("amount_total:sum", 0.0))
+            partner = row.get("partner_id")
+            if isinstance(partner, (list, tuple)) and len(partner) >= 2:
+                name = partner[1]
+            else:
+                name = str(partner or "Sin contacto")
+            amount = row.get("amount_total", row.get("amount_total:sum", 0.0))
         lines.append(f"{index}. {name}: {format_currency(amount, None)}")
     return "\n".join(lines)
 

@@ -653,28 +653,30 @@ def _company_currency_meta():
 
 MODEL_CONTEXT_SUGGESTIONS = {
     "purchase.order": [
-        {"label": "Ver pickings", "prompt": "muéstrame los pickings asociados"},
-        {"label": "Recepciones pendientes", "prompt": "muéstrame las recepciones pendientes"},
-        {"label": "Recepciones canceladas", "prompt": "muéstrame las recepciones canceladas"},
-        {"label": "Facturas del proveedor", "prompt": "muéstrame las facturas relacionadas"},
-        {"label": "Productos pendientes", "prompt": "muéstrame sus productos"},
+        {"label": "Monto de compra", "prompt": "cuál es el monto total de esta compra"},
+        {"label": "Estado de compra", "prompt": "cuál es el estado de esta compra"},
+        {"label": "Productos comprados", "prompt": "qué productos tiene esta compra"},
+        {"label": "Cumple política", "prompt": "esta compra requiere aprobación según la política"},
+        {"label": "Facturas relacionadas", "prompt": "muéstrame las facturas relacionadas con esta compra"},
     ],
     "sale.order": [
-        {"label": "Facturas relacionadas", "prompt": "muéstrame las facturas relacionadas"},
-        {"label": "Pagos pendientes", "prompt": "muéstrame los pagos pendientes"},
-        {"label": "Productos vendidos", "prompt": "muéstrame sus productos"},
-        {"label": "Margen estimado", "prompt": "cuál es el margen estimado de esta venta"},
+        {"label": "Monto de venta", "prompt": "cuál es el monto total de esta venta"},
+        {"label": "Estado de venta", "prompt": "cuál es el estado de esta venta"},
+        {"label": "Productos vendidos", "prompt": "qué productos se vendieron en esta venta"},
+        {"label": "Cumple política", "prompt": "esta venta cumple según la política"},
+        {"label": "Facturas relacionadas", "prompt": "muéstrame las facturas relacionadas con esta venta"},
     ],
     "account.move": [
-        {"label": "Ver vencidas", "prompt": "muéstrame las facturas vencidas"},
-        {"label": "Filtrar por cliente", "prompt": "filtra por cliente"},
-        {"label": "Estado de pago", "prompt": "cuál es el estado de pago"},
-        {"label": "Exportar", "prompt": "exporta este resultado"},
+        {"label": "Monto de factura", "prompt": "cuál es el monto total de esta factura"},
+        {"label": "Estado de factura", "prompt": "cuál es el estado de esta factura"},
+        {"label": "Cliente", "prompt": "quién es el cliente de esta factura"},
+        {"label": "Productos facturados", "prompt": "qué productos tiene esta factura"},
     ],
     "stock.picking": [
-        {"label": "Movimientos", "prompt": "muéstrame los movimientos de este picking"},
+        {"label": "Estado de picking", "prompt": "cuál es el estado de este picking"},
+        {"label": "Movimientos", "prompt": "qué movimientos tiene este picking"},
+        {"label": "Productos", "prompt": "qué productos tiene este picking"},
         {"label": "Pendientes", "prompt": "qué pickings están pendientes"},
-        {"label": "Cancelados", "prompt": "qué pickings están cancelados"},
     ],
 }
 

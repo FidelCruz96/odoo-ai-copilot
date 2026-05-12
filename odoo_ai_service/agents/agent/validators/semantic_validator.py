@@ -30,10 +30,25 @@ SEMANTIC_RULES = {
         "required_orderby": "__count desc",
         "forbidden_fields": ["amount_total:sum"],
     },
+    "top_ventas_por_monto": {
+        "tool": "query_odoo_search",
+        "model": "sale.order",
+        "required_orderby": "amount_total desc",
+    },
     "top_cliente_por_monto": {
         "tool": "query_odoo_group",
         "model": "sale.order",
         "required_groupby": ["partner_id"],
+    },
+    "top_compras_por_monto": {
+        "tool": "query_odoo_search",
+        "model": "purchase.order",
+        "required_orderby": "amount_total desc",
+    },
+    "top_facturas_por_monto": {
+        "tool": "query_odoo_search",
+        "model": "account.move",
+        "required_orderby": "amount_total desc",
     },
     "top_proveedor_por_compras": {
         "tool": "query_odoo_group",

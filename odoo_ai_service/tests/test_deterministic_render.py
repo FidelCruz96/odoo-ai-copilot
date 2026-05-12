@@ -117,6 +117,114 @@ class TestDeterministicRender(unittest.TestCase):
         self.assertIn("1. F001-00012 | Cliente: Cliente 3 | Fecha: 2026-04-12", answer)
         self.assertIn("2. F001-00011 | Cliente: Cliente 2 | Fecha: 2026-04-11", answer)
 
+    def test_top_sales_render_individual_orders(self):
+        plan = {
+            "tool": "query_odoo_search",
+            "arguments": {
+                "model": "sale.order",
+                "domain": [["state", "in", ["sale", "done"]]],
+                "orderby": "amount_total desc",
+                "limit": 2,
+            },
+            "read_back": {
+                "tool": "query_odoo_read",
+                "fields": ["name", "partner_id", "date_order", "amount_total", "state"],
+            },
+        }
+
+        with patch.object(
+            agent,
+            "execute_tool",
+            side_effect=[
+                [44, 45],
+                [
+                    {"id": 44, "name": "SO044", "partner_id": [10, "Cliente A"], "date_order": "2026-05-01", "amount_total": 9000.0, "state": "sale"},
+                    {"id": 45, "name": "SO045", "partner_id": [11, "Cliente B"], "date_order": "2026-05-02", "amount_total": 8000.0, "state": "sale"},
+                ],
+            ],
+        ):
+            answer, _memory = agent._execute_deterministic_plan(
+                "top_ventas_por_monto",
+                plan,
+                "top ventas",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Órdenes de venta encontradas:", answer)
+        self.assertIn("1. SO044 | Cliente: Cliente A", answer)
+        self.assertIn("Monto: 9000.0", answer)
+
+    def test_top_purchases_render_individual_orders(self):
+        plan = {
+            "tool": "query_odoo_search",
+            "arguments": {
+                "model": "purchase.order",
+                "domain": [["state", "in", ["purchase", "done"]]],
+                "orderby": "amount_total desc",
+                "limit": 2,
+            },
+            "read_back": {
+                "tool": "query_odoo_read",
+                "fields": ["name", "partner_id", "date_order", "amount_total", "state"],
+            },
+        }
+
+        with patch.object(
+            agent,
+            "execute_tool",
+            side_effect=[
+                [31],
+                [{"id": 31, "name": "PO031"}],
+                [{"id": 31, "name": "PO031", "partner_id": [20, "Proveedor A"], "date_order": "2026-05-03", "amount_total": 7000.0, "state": "purchase"}],
+            ],
+        ):
+            answer, _memory = agent._execute_deterministic_plan(
+                "top_compras_por_monto",
+                plan,
+                "top compras",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Órdenes de compra encontradas:", answer)
+        self.assertIn("1. PO031 | Proveedor: Proveedor A", answer)
+
+    def test_top_invoices_render_individual_documents(self):
+        plan = {
+            "tool": "query_odoo_search",
+            "arguments": {
+                "model": "account.move",
+                "domain": [["move_type", "=", "out_invoice"], ["state", "=", "posted"]],
+                "orderby": "amount_total desc",
+                "limit": 2,
+            },
+            "read_back": {
+                "tool": "query_odoo_read",
+                "fields": ["name", "partner_id", "invoice_date", "amount_total", "payment_state", "state", "move_type"],
+            },
+        }
+
+        with patch.object(
+            agent,
+            "execute_tool",
+            side_effect=[
+                [12],
+                [{"id": 12, "name": "INV/2026/00012"}],
+                [{"id": 12, "name": "INV/2026/00012", "partner_id": [30, "Cliente C"], "invoice_date": "2026-05-04", "amount_total": 6000.0, "state": "posted"}],
+            ],
+        ):
+            answer, _memory = agent._execute_deterministic_plan(
+                "top_facturas_por_monto",
+                plan,
+                "top facturas",
+                self._metrics(),
+                {},
+            )
+
+        self.assertIn("Documentos encontrados:", answer)
+        self.assertIn("1. INV/2026/00012 | Contacto: Cliente C", answer)
+
     def test_product_qty_group_uses_business_metric_not_auto_count(self):
         plan = {
             "tool": "query_odoo_group",

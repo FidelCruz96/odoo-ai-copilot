@@ -71,13 +71,23 @@ def _validate_optional_string(tool_name: str, payload: dict, field: str) -> dict
     return None
 
 
+def _validate_optional_dict(tool_name: str, payload: dict, field: str) -> dict | None:
+    value = payload.get(field)
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        return _error(tool_name, field, "must be an object")
+    return None
+
+
 def _validate_get_schema(arguments: dict) -> tuple[dict | None, dict | None]:
     tool_name = "get_schema"
     payload = dict(arguments)
-    allowed = {"models", "force"}
+    allowed = {"models", "force", "context"}
     for validator in (
         lambda: _reject_extra(tool_name, payload, allowed),
         lambda: _require_string_list(tool_name, payload, "models"),
+        lambda: _validate_optional_dict(tool_name, payload, "context"),
     ):
         err = validator()
         if err:
@@ -89,13 +99,14 @@ def _validate_get_schema(arguments: dict) -> tuple[dict | None, dict | None]:
 def _validate_search(arguments: dict) -> tuple[dict | None, dict | None]:
     tool_name = "query_odoo_search"
     payload = {"domain": [], "orderby": None, "limit": 20, **dict(arguments)}
-    allowed = {"model", "domain", "orderby", "limit"}
+    allowed = {"model", "domain", "orderby", "limit", "context"}
     for validator in (
         lambda: _reject_extra(tool_name, payload, allowed),
         lambda: _require_string(tool_name, payload, "model"),
         lambda: _validate_optional_list(tool_name, payload, "domain"),
         lambda: _validate_optional_string(tool_name, payload, "orderby"),
         lambda: _validate_optional_int(tool_name, payload, "limit"),
+        lambda: _validate_optional_dict(tool_name, payload, "context"),
     ):
         err = validator()
         if err:
@@ -106,12 +117,13 @@ def _validate_search(arguments: dict) -> tuple[dict | None, dict | None]:
 def _validate_count(arguments: dict) -> tuple[dict | None, dict | None]:
     tool_name = "query_odoo_count"
     payload = {"domain": [], "limit": None, **dict(arguments)}
-    allowed = {"model", "domain", "limit"}
+    allowed = {"model", "domain", "limit", "context"}
     for validator in (
         lambda: _reject_extra(tool_name, payload, allowed),
         lambda: _require_string(tool_name, payload, "model"),
         lambda: _validate_optional_list(tool_name, payload, "domain"),
         lambda: _validate_optional_int(tool_name, payload, "limit"),
+        lambda: _validate_optional_dict(tool_name, payload, "context"),
     ):
         err = validator()
         if err:
@@ -122,12 +134,13 @@ def _validate_count(arguments: dict) -> tuple[dict | None, dict | None]:
 def _validate_read(arguments: dict) -> tuple[dict | None, dict | None]:
     tool_name = "query_odoo_read"
     payload = dict(arguments)
-    allowed = {"model", "ids", "fields"}
+    allowed = {"model", "ids", "fields", "context"}
     for validator in (
         lambda: _reject_extra(tool_name, payload, allowed),
         lambda: _require_string(tool_name, payload, "model"),
         lambda: _require_int_list(tool_name, payload, "ids"),
         lambda: _require_string_list(tool_name, payload, "fields"),
+        lambda: _validate_optional_dict(tool_name, payload, "context"),
     ):
         err = validator()
         if err:
@@ -138,7 +151,7 @@ def _validate_read(arguments: dict) -> tuple[dict | None, dict | None]:
 def _validate_group(arguments: dict) -> tuple[dict | None, dict | None]:
     tool_name = "query_odoo_group"
     payload = {"domain": [], "orderby": None, "limit": None, **dict(arguments)}
-    allowed = {"model", "domain", "fields", "groupby", "orderby", "limit"}
+    allowed = {"model", "domain", "fields", "groupby", "orderby", "limit", "context"}
     for validator in (
         lambda: _reject_extra(tool_name, payload, allowed),
         lambda: _require_string(tool_name, payload, "model"),
@@ -147,6 +160,7 @@ def _validate_group(arguments: dict) -> tuple[dict | None, dict | None]:
         lambda: _require_string_list(tool_name, payload, "groupby"),
         lambda: _validate_optional_string(tool_name, payload, "orderby"),
         lambda: _validate_optional_int(tool_name, payload, "limit"),
+        lambda: _validate_optional_dict(tool_name, payload, "context"),
     ):
         err = validator()
         if err:

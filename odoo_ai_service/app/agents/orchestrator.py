@@ -89,6 +89,15 @@ def _extract_first_tool_result(execution_result: ToolExecutionResult) -> Any:
     return None
 
 
+def _extract_first_record_list(execution_result: ToolExecutionResult) -> Any:
+    results = execution_result.get("results") or []
+    for row in results:
+        result = row.get("result")
+        if isinstance(result, list) and result and isinstance(result[0], dict):
+            return result
+    return _extract_first_tool_result(execution_result)
+
+
 def _resolve_active_model(primary_record: dict[str, Any] | None, plan_entity: Entity | None, domain: str | None) -> str | None:
     if isinstance(primary_record, dict) and isinstance(primary_record.get("model"), str):
         return primary_record.get("model")
@@ -97,6 +106,69 @@ def _resolve_active_model(primary_record: dict[str, Any] | None, plan_entity: En
     if domain and domain in DOMAIN_MODEL_MAP:
         return DOMAIN_MODEL_MAP[domain].get("main_model")
     return None
+
+
+def _domain_for_model(model: str | None) -> str | None:
+    if not isinstance(model, str):
+        return None
+    for domain_name, config in DOMAIN_MODEL_MAP.items():
+        if config.get("main_model") == model:
+            return domain_name
+    return None
+
+
+def _entity_type_for_domain(domain: str | None) -> str:
+    if domain == "purchase":
+        return "purchase_order"
+    if domain == "sale":
+        return "sale_order"
+    if domain == "invoice":
+        return "invoice"
+    if domain == "inventory":
+        return "stock_picking"
+    return "active_record"
+
+
+def _client_active_entity_from_context(context: AgentContext | dict | None) -> ActiveEntity | None:
+    if not isinstance(context, dict):
+        return None
+    client = context.get("client")
+    if not isinstance(client, dict):
+        return None
+    active_model = client.get("active_model")
+    active_id = client.get("active_id")
+    if isinstance(active_id, str) and active_id.isdigit():
+        active_id = int(active_id)
+    if not isinstance(active_model, str) or not isinstance(active_id, int) or active_id <= 0:
+        return None
+    domain = _domain_for_model(active_model)
+    if domain not in {"purchase", "sale", "invoice", "inventory"}:
+        return None
+    return ActiveEntity(
+        type=_entity_type_for_domain(domain),
+        model=active_model,
+        id=active_id,
+        name=None,
+        confidence=0.92,
+    )
+
+
+def _memory_with_client_active_entity(
+    memory: ConversationMemory | None,
+    context: AgentContext | dict | None,
+    session_id: str,
+    user_id: int,
+    db_name: str,
+) -> ConversationMemory | None:
+    if memory and memory.active_entity:
+        return memory
+    client_entity = _client_active_entity_from_context(context)
+    if not client_entity:
+        return memory
+    base = memory or ConversationMemory(session_id=session_id, user_id=user_id, db_name=db_name)
+    base.active_entity = client_entity
+    base.active_domain = _domain_for_model(client_entity.model)
+    return base
 
 
 def _safe_result_sample(result: Any) -> Any:
@@ -213,6 +285,13 @@ def ask_hybrid_agent(
 
     memory_started_at = perf_counter()
     memory = load_memory(resolved_session_id, base_context)
+    memory = _memory_with_client_active_entity(
+        memory,
+        base_context,
+        resolved_session_id,
+        scoped_user_id,
+        scoped_db_name,
+    )
     memory_load_ms = round((perf_counter() - memory_started_at) * 1000, 2)
     context_resolution = resolve_context(
         entity,
@@ -344,8 +423,10 @@ def ask_hybrid_agent(
     if route == FALLBACK:
         legacy = _fallback_response(question, base_context, history)
         latency_ms = round((perf_counter() - started_at) * 1000, 2)
+        legacy_needs_clarification = bool(legacy.get("needs_clarification")) or legacy.get("answer_mode") == "clarification_required"
+        response_route = CLARIFICATION if legacy_needs_clarification else FALLBACK
         metrics = _build_metrics(
-            route=FALLBACK,
+            route=response_route,
             intent=intent,
             domain=domain,
             tools_used=(legacy.get("metadata") or {}).get("tools_used") or [],
@@ -358,8 +439,8 @@ def ask_hybrid_agent(
         )
         return {
             "answer": legacy.get("answer"),
-            "route": FALLBACK,
-            "route_selected": FALLBACK,
+            "route": response_route,
+            "route_selected": response_route,
             "intent_detected": intent,
             "domain_detected": domain,
             "tools_used": metrics["tools_used"],
@@ -371,7 +452,7 @@ def ask_hybrid_agent(
             "session_id": resolved_session_id,
             "memory": legacy.get("memory") or {},
             "memory_hit": metrics["memory_hit"],
-            "needs_clarification": False,
+            "needs_clarification": legacy_needs_clarification,
             "grounded": metrics["grounded"],
             "response_faithful": metrics["response_faithful"],
             "active_model": metrics["active_model"],
@@ -411,7 +492,7 @@ def ask_hybrid_agent(
         grounded = True
         response_faithful = True
     elif route == ERP_DATA and intent == "ranking":
-        answer = compose_ranking_result(_extract_first_tool_result(execution_result), domain=domain)
+        answer = compose_ranking_result(_extract_first_record_list(execution_result), domain=domain)
         grounded = True
         response_faithful = True
     elif route == KNOWLEDGE:

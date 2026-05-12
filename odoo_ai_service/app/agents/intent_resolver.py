@@ -23,7 +23,7 @@ INTENT_MAP = {
     "amount_lookup": ["monto", "total", "importe", "valor"],
     "status_lookup": ["estado", "situacion"],
     "count": ["cuantos", "cuantas", "cantidad", "numero de", "numero ", "nro "],
-    "ranking": ["top", "mayores", "mas alto", "mayor", "ranking"],
+    "ranking": ["top", "mayores", "mas alto", "más alto", "mas alta", "más alta", "mas altas", "más altas", "mayor", "ranking"],
     "line_items": ["productos", "lineas", "items", "detalle"],
     "policy_validation": POLICY_VALIDATION_KEYWORDS,
     "explanation": ["que es", "como funciona", "explica", "documentacion", "manual", "politica", "proceso"],
@@ -38,12 +38,6 @@ def resolve_intent(text: str, domain: str | None = None, entity: Entity | None =
 
     if entity and "segun" in value and domain in {"purchase", "sale", "invoice", "inventory"}:
         return "policy_validation"
-
-    if any(keyword in value for keyword in INTENT_MAP["explanation"]):
-        return "explanation"
-
-    if "segun" in value and domain in {"knowledge", "purchase", "sale", "invoice", "inventory"}:
-        return "explanation"
 
     amount_hint = any(keyword in value for keyword in INTENT_MAP["amount_lookup"])
     if amount_hint:
@@ -64,6 +58,12 @@ def resolve_intent(text: str, domain: str | None = None, entity: Entity | None =
 
     if any(keyword in value for keyword in INTENT_MAP["line_items"]):
         return "line_items"
+
+    if any(keyword in value for keyword in INTENT_MAP["explanation"]):
+        return "explanation"
+
+    if "segun" in value and domain in {"knowledge", "purchase", "sale", "invoice", "inventory"}:
+        return "explanation"
 
     if domain == "knowledge":
         return "explanation"

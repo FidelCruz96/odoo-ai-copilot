@@ -19,6 +19,14 @@ sys.modules.setdefault("openai", openai_stub)
 from agents.agent.tool_loop import ToolLoopCallbacks, run_tool_guided_loop
 
 
+class _ToolCall:
+    id = "call-1"
+    function = types.SimpleNamespace(
+        name="query_odoo_group",
+        arguments='{"model":"sale.order","domain":[],"fields":["amount_total:sum"],"groupby":[]}',
+    )
+
+
 def _callbacks(is_data_question=True):
     memory = {}
 
@@ -70,6 +78,41 @@ class TestToolLoop(unittest.TestCase):
         self.assertEqual(result["error_type"], "no_tool_for_data")
         self.assertEqual(metrics["tokens_input"], 3)
         self.assertEqual(metrics["tokens_output"], 2)
+
+    def test_legacy_tool_loop_passes_context_to_odoo_tools(self):
+        tool_response = types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=types.SimpleNamespace(tool_calls=[_ToolCall()], content=None))],
+            usage=types.SimpleNamespace(prompt_tokens=3, completion_tokens=2),
+        )
+        final_response = types.SimpleNamespace(
+            choices=[types.SimpleNamespace(message=types.SimpleNamespace(tool_calls=None, content="ok"))],
+            usage=types.SimpleNamespace(prompt_tokens=4, completion_tokens=1),
+        )
+
+        def finalize(answer, success, error_type=None):
+            return {"answer": answer, "success": success, "error_type": error_type}
+
+        context = {"access_context": {"uid": 2, "db_name": "admin"}, "request_id": "req-test"}
+        metrics = {"tools_used": [], "tool_calls": 0, "tokens_input": 0, "tokens_output": 0}
+
+        with patch("agents.agent.tool_loop.call_llm", side_effect=[tool_response, final_response]):
+            with patch("agents.agent.tool_loop.get_model_schema", return_value=None):
+                with patch("agents.agent.tool_loop.execute_tool", return_value=[{"amount_total": 100.0}]) as execute_tool:
+                    result = run_tool_guided_loop(
+                        question="ventas del mes",
+                        messages=[{"role": "user", "content": "ventas del mes"}],
+                        max_iterations=2,
+                        metrics=metrics,
+                        intent_plan=None,
+                        catalog_intent=None,
+                        query_has_explicit_entity_hint=False,
+                        context=context,
+                        finalize=finalize,
+                        callbacks=_callbacks(is_data_question=True),
+                    )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(execute_tool.call_args.args[1]["context"], context)
 
 
 if __name__ == "__main__":

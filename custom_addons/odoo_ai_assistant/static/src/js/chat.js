@@ -10,27 +10,30 @@ const CONTEXT_SIGNATURE_STORAGE = "odoo_ai_chat_context_signature"
 const NAV_RESOLVE_CACHE = {}
 const MODEL_CONTEXT_SUGGESTIONS = {
     "purchase.order": [
-        { label: "Ver pickings", prompt: "muéstrame los pickings asociados" },
-        { label: "Recepciones pendientes", prompt: "muéstrame las recepciones pendientes" },
-        { label: "Recepciones canceladas", prompt: "muéstrame las recepciones canceladas" },
-        { label: "Facturas del proveedor", prompt: "muéstrame las facturas relacionadas" },
-        { label: "Productos pendientes", prompt: "muéstrame sus productos" },
+        { label: "Monto de compra", prompt: "cuál es el monto total de esta compra" },
+        { label: "Estado de compra", prompt: "cuál es el estado de esta compra" },
+        { label: "Productos comprados", prompt: "qué productos tiene esta compra" },
+        { label: "Cumple política", prompt: "esta compra requiere aprobación según la política" },
+        { label: "Facturas relacionadas", prompt: "muéstrame las facturas relacionadas con esta compra" },
     ],
     "sale.order": [
-        { label: "Facturas relacionadas", prompt: "muéstrame las facturas relacionadas" },
-        { label: "Pagos pendientes", prompt: "muéstrame los pagos pendientes" },
-        { label: "Productos vendidos", prompt: "muéstrame sus productos" },
-        { label: "Margen estimado", prompt: "cuál es el margen estimado de esta venta" },
+        { label: "Monto de venta", prompt: "cuál es el monto total de esta venta" },
+        { label: "Estado de venta", prompt: "cuál es el estado de esta venta" },
+        { label: "Productos vendidos", prompt: "qué productos se vendieron en esta venta" },
+        { label: "Cumple política", prompt: "esta venta cumple según la política" },
+        { label: "Facturas relacionadas", prompt: "muéstrame las facturas relacionadas con esta venta" },
     ],
     "account.move": [
-        { label: "Abrir facturas", prompt: "muéstrame facturas relacionadas" },
-        { label: "Ver vencidas", prompt: "muéstrame las facturas vencidas" },
-        { label: "Filtrar por cliente", prompt: "filtra por cliente" },
+        { label: "Monto de factura", prompt: "cuál es el monto total de esta factura" },
+        { label: "Estado de factura", prompt: "cuál es el estado de esta factura" },
+        { label: "Cliente", prompt: "quién es el cliente de esta factura" },
+        { label: "Productos facturados", prompt: "qué productos tiene esta factura" },
     ],
     "stock.picking": [
-        { label: "Ver movimientos", prompt: "muéstrame los movimientos de este picking" },
+        { label: "Estado de picking", prompt: "cuál es el estado de este picking" },
+        { label: "Movimientos", prompt: "qué movimientos tiene este picking" },
+        { label: "Productos", prompt: "qué productos tiene este picking" },
         { label: "Pendientes", prompt: "qué pickings están pendientes" },
-        { label: "Cancelados", prompt: "qué pickings están cancelados" },
     ],
 }
 const MODEL_PLACEHOLDERS = {
@@ -53,10 +56,12 @@ const ANSWER_MODE_BADGES = {
     fallback_explanatory: "Resumen",
 }
 const DEFAULT_SUGGESTIONS = [
-    { label: "Ventas del mes", prompt: "ventas del mes" },
-    { label: "Facturas pendientes", prompt: "facturas pendientes este mes" },
-    { label: "Top clientes", prompt: "top clientes por facturación" },
-    { label: "Stock negativo", prompt: "qué productos tienen stock negativo" },
+    { label: "Cantidad de ventas", prompt: "cuántas ventas hay" },
+    { label: "Top clientes ventas", prompt: "top clientes por ventas" },
+    { label: "Cantidad de compras", prompt: "cuántas compras hay" },
+    { label: "Top proveedores", prompt: "top proveedores por compras" },
+    { label: "Facturación clientes", prompt: "top clientes por facturación" },
+    { label: "Política de compras", prompt: "cómo funciona la política de aprobación de compras" },
 ]
 let aiChatContext = {}
 let lastUserMessage = ""
@@ -427,6 +432,126 @@ function toSafeHtml(text) {
     return formatInlineMarkdown(escapeHtml(String(text || "")))
 }
 
+function normalizeClarificationOption(option) {
+    if (typeof option === "string") {
+        return { label: option, value: option }
+    }
+    if (!option || typeof option !== "object") {
+        return null
+    }
+    const key = option.key || option.id || ""
+    const label = option.label || option.display_name || option.value || option.submit_value || key
+    const value = option.submit_value || option.value || option.label || option.display_name || key
+    if (!label || !value) {
+        return null
+    }
+    return {
+        key,
+        label,
+        value,
+    }
+}
+
+function normalizeClarification(response, ui) {
+    const uiClarification = ui && ui.clarification ? ui.clarification : null
+    const responseNeedsClarification = response && response.needs_clarification
+    if (uiClarification && uiClarification.required === false && !responseNeedsClarification) {
+        return null
+    }
+    if (!uiClarification && !responseNeedsClarification) {
+        return null
+    }
+
+    const source = uiClarification || {}
+    const rawOptions = Array.isArray(source.options)
+        ? source.options
+        : response && Array.isArray(response.clarification_options)
+            ? response.clarification_options
+            : []
+    const options = rawOptions.map(normalizeClarificationOption).filter(Boolean)
+    const question =
+        source.question ||
+        (response && response.answer_mode === "clarification_required" ? response.answer : null) ||
+        "Necesito una precisión para responder mejor."
+
+    return {
+        required: true,
+        question,
+        options,
+    }
+}
+
+function normalizeStringList(items, limit = 4) {
+    if (!Array.isArray(items)) {
+        return []
+    }
+    return items
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .slice(0, limit)
+}
+
+function summarizeSources(sources) {
+    if (!Array.isArray(sources) || !sources.length) {
+        return []
+    }
+    return sources.slice(0, 3).map((source) => {
+        if (typeof source === "string") {
+            return source
+        }
+        if (!source || typeof source !== "object") {
+            return ""
+        }
+        return source.doc_name || source.title || source.module || source.doc_id || "Fuente RAG"
+    }).filter(Boolean)
+}
+
+function summarizeOdooEvidence(evidence) {
+    if (!Array.isArray(evidence) || !evidence.length) {
+        return []
+    }
+    return evidence.slice(0, 3).map((item) => {
+        if (!item || typeof item !== "object") {
+            return ""
+        }
+        const model = item.model || item.tool || "Odoo"
+        const operation = item.operation || item.tool_name || item.tool || "consulta"
+        return `${model} · ${operation}`
+    }).filter(Boolean)
+}
+
+function buildEvidenceMeta(response) {
+    if (!response || typeof response !== "object") {
+        return null
+    }
+    const metadata = response.metadata && typeof response.metadata === "object" ? response.metadata : {}
+    const tools = normalizeStringList(response.tools_used || metadata.tools_used)
+    const sources = response.sources || metadata.sources || []
+    const odooEvidence = response.odoo_evidence || metadata.odoo_evidence || []
+    const evidence = {
+        traceId: response.request_id || response.trace_id || metadata.trace_id || null,
+        route: response.route_selected || response.route || metadata.route_selected || null,
+        intent: response.intent_detected || metadata.intent_detected || null,
+        domain: response.domain_detected || metadata.domain_detected || null,
+        tools,
+        latencyMs: response.latency_ms || metadata.latency_ms || null,
+        tokensUsed: response.tokens_used || metadata.tokens_used || null,
+        sourceLabels: summarizeSources(sources),
+        odooLabels: summarizeOdooEvidence(odooEvidence),
+    }
+    const hasEvidence =
+        evidence.traceId ||
+        evidence.route ||
+        evidence.intent ||
+        evidence.domain ||
+        evidence.tools.length ||
+        evidence.sourceLabels.length ||
+        evidence.odooLabels.length ||
+        evidence.latencyMs ||
+        evidence.tokensUsed
+    return hasEvidence ? evidence : null
+}
+
 function inferEntityHeader(queryText) {
     const q = String(queryText || "").toLowerCase()
     if (q.includes("cliente")) {
@@ -717,18 +842,62 @@ function buildMessageMeta(response, ui, questionText = "") {
     return {
         badges: normalizeBadges(response, ui),
         actions: (response && Array.isArray(response.actions) ? response.actions : null) || (ui && ui.actions) || [],
-        clarification:
-            (ui && ui.clarification) ||
-            (response && response.needs_clarification
-                ? { required: true, question: "Necesito una precisión para responder mejor.", options: response.clarification_options || [] }
-                : null),
+        clarification: normalizeClarification(response, ui),
         answerTitle: ANSWER_TYPE_LABELS[answerType] || null,
         businessTitle: toBusinessTitle(questionText),
         queryText: questionText || "",
         currencySymbol: response && response.metadata ? response.metadata.currency_symbol : null,
         currencyName: response && response.metadata ? response.metadata.currency_name : null,
         latencyMs: response && response.metadata ? response.metadata.latency_ms : null,
+        evidence: buildEvidenceMeta(response),
     }
+}
+
+function appendEvidenceRow(container, label, value) {
+    if (!value) {
+        return
+    }
+    const row = document.createElement("div")
+    row.className = "o_ai_evidence_row"
+
+    const labelNode = document.createElement("span")
+    labelNode.className = "o_ai_evidence_label"
+    labelNode.innerText = label
+    row.appendChild(labelNode)
+
+    const valueNode = document.createElement("span")
+    valueNode.className = "o_ai_evidence_value"
+    valueNode.innerText = Array.isArray(value) ? value.join(", ") : String(value)
+    row.appendChild(valueNode)
+
+    container.appendChild(row)
+}
+
+function renderEvidencePanel(evidence) {
+    if (!evidence) {
+        return null
+    }
+    const details = document.createElement("details")
+    details.className = "o_ai_evidence_panel"
+
+    const summary = document.createElement("summary")
+    summary.innerText = "Evidencia y métricas"
+    details.appendChild(summary)
+
+    const body = document.createElement("div")
+    body.className = "o_ai_evidence_body"
+    appendEvidenceRow(body, "Ruta", evidence.route)
+    appendEvidenceRow(body, "Intent", evidence.intent)
+    appendEvidenceRow(body, "Dominio", evidence.domain)
+    appendEvidenceRow(body, "Tools", evidence.tools)
+    appendEvidenceRow(body, "Odoo", evidence.odooLabels)
+    appendEvidenceRow(body, "Fuentes", evidence.sourceLabels)
+    appendEvidenceRow(body, "Latencia", evidence.latencyMs ? `${Math.round(evidence.latencyMs)} ms` : null)
+    appendEvidenceRow(body, "Tokens", evidence.tokensUsed)
+    appendEvidenceRow(body, "Trace", evidence.traceId)
+    details.appendChild(body)
+
+    return details
 }
 
 function appendMessage(role, text, time, persist = true, meta = null) {
@@ -802,6 +971,13 @@ function appendMessage(role, text, time, persist = true, meta = null) {
         bubble.appendChild(actionsWrap)
     }
 
+    if (role === "bot" && meta && meta.evidence) {
+        const evidencePanel = renderEvidencePanel(meta.evidence)
+        if (evidencePanel) {
+            bubble.appendChild(evidencePanel)
+        }
+    }
+
     if (role === "bot" && meta && meta.clarification && meta.clarification.required) {
         const clarifyBox = document.createElement("div")
         clarifyBox.className = "o_ai_clarify_box"
@@ -815,15 +991,16 @@ function appendMessage(role, text, time, persist = true, meta = null) {
         optionsWrap.className = "o_ai_clarify_options"
         const options = Array.isArray(meta.clarification.options) ? meta.clarification.options : []
         options.forEach((opt) => {
+            const normalizedOpt = normalizeClarificationOption(opt)
+            if (!normalizedOpt) {
+                return
+            }
             const chip = document.createElement("button")
             chip.type = "button"
             chip.className = "o_ai_chip"
-            chip.innerText = opt.label || opt.key
+            chip.innerText = normalizedOpt.label
             chip.addEventListener("click", () => {
-                const value = opt.submit_value || opt.value || opt.label || opt.key
-                if (value) {
-                    sendMessage(String(value))
-                }
+                sendMessage(String(normalizedOpt.value))
             })
             optionsWrap.appendChild(chip)
         })

@@ -152,6 +152,36 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertTrue(result["needs_clarification"])
         self.assertIn("contexto", result["answer"].lower())
 
+    def test_status_uses_active_ui_purchase_context(self):
+        with patch("app.agents.orchestrator.execute_plan", return_value={
+            "success": True,
+            "tools_used": ["query_odoo_read"],
+            "results": [
+                {"tool": "query_odoo_read", "args": {"model": "purchase.order"}, "result": [{"id": 11, "name": "P00011", "state": "purchase"}]},
+            ],
+            "partial_failure": False,
+        }) as execute_plan:
+            result = ask_hybrid_agent(
+                "en que estado esta la compra?",
+                session_id="flow-ui-active-status",
+                context={
+                    "memory": {},
+                    "client": {
+                        "active_model": "purchase.order",
+                        "active_id": 11,
+                    },
+                },
+                history=[],
+            )
+
+        self.assertEqual(result["route_selected"], "erp_data")
+        self.assertEqual(result["intent_detected"], "status_lookup")
+        self.assertTrue(result["memory_hit"])
+        self.assertEqual(result["active_model"], "purchase.order")
+        self.assertEqual(result["active_id"], 11)
+        self.assertEqual(execute_plan.call_args.args[0][0]["tool"], "query_odoo_read")
+        self.assertEqual(execute_plan.call_args.args[0][0]["args"]["ids"], [11])
+
     def test_documentation_pure(self):
         with patch("app.agents.orchestrator.execute_plan", return_value={
             "success": True,
@@ -377,6 +407,14 @@ class TestOrchestratorFlow(unittest.TestCase):
         self.assertEqual(result["route_selected"], "clarification")
         self.assertTrue(result["needs_clarification"])
         execute_plan.assert_not_called()
+
+    def test_ambiguous_period_metric_clarifies_instead_of_legacy_tool(self):
+        result = ask_hybrid_agent("ventas del mes", session_id="flow-period-ambiguous", context={"memory": {}}, history=[])
+
+        self.assertEqual(result["route_selected"], "clarification")
+        self.assertTrue(result["needs_clarification"])
+        self.assertEqual(result["tools_used"], [])
+        self.assertIn("cantidad", result["answer"].lower())
 
     def test_odoo_evidence_uses_real_result_sample(self):
         with patch("app.agents.orchestrator.execute_plan", return_value={

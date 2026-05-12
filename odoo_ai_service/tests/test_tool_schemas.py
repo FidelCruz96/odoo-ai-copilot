@@ -12,6 +12,13 @@ class TestToolSchemas(unittest.TestCase):
         self.assertEqual(args["domain"], [])
         self.assertEqual(args["limit"], 20)
 
+    def test_search_allows_internal_runtime_context(self):
+        context = {"access_context": {"uid": 2, "db_name": "admin"}}
+        args, error = validate_tool_arguments("query_odoo_search", {"model": "purchase.order", "context": context})
+
+        self.assertIsNone(error)
+        self.assertEqual(args["context"], context)
+
     def test_read_arguments_reject_missing_ids(self):
         args, error = validate_tool_arguments(
             "query_odoo_read",

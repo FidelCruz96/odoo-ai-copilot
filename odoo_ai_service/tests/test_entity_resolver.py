@@ -27,6 +27,13 @@ class TestEntityResolver(unittest.TestCase):
         self.assertEqual(entity["target_domain"], "sale")
         self.assertEqual(entity["model"], "sale.order")
 
+    def test_detect_simple_purchase_code_with_domain_hint(self):
+        entity = resolve_entity("estado de la compra p00011")
+        self.assertEqual(entity["type"], "business_document_code")
+        self.assertEqual(entity["code"], "P00011")
+        self.assertEqual(entity["target_domain"], "purchase")
+        self.assertEqual(entity["model"], "purchase.order")
+
 
 if __name__ == "__main__":
     unittest.main()

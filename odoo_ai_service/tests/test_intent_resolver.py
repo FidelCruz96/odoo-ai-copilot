@@ -11,6 +11,17 @@ class TestIntentResolver(unittest.TestCase):
     def test_count(self):
         self.assertEqual(resolve_intent("cuantas compras hay"), "count")
 
+    def test_ranking_amount_variants(self):
+        self.assertEqual(resolve_intent("ventas mas altas", domain="sale"), "ranking")
+        self.assertEqual(resolve_intent("compras más altas", domain="purchase"), "ranking")
+        self.assertEqual(resolve_intent("facturacion mas alta", domain="invoice"), "ranking")
+
+    def test_status_lookup_has_priority_over_explanation_phrase(self):
+        self.assertEqual(
+            resolve_intent("en que estado se encuentra la compra p00011", domain="purchase"),
+            "status_lookup",
+        )
+
     def test_policy_validation(self):
         self.assertEqual(resolve_intent("debio aprobarse esta compra segun la politica"), "policy_validation")
         self.assertEqual(resolve_intent("po-i-10-00026 requiere aprobacion?", domain="purchase", entity={"type": "purchase_order"}), "policy_validation")

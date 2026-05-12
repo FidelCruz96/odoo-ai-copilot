@@ -9,6 +9,7 @@ PURCHASE_ORDER_RE = re.compile(r"\bpo(?:[-a-z0-9]*\d[-a-z0-9]*)\b", re.I)
 SALE_ORDER_RE = re.compile(r"\bso(?:[-a-z0-9]*\d[-a-z0-9]*)\b", re.I)
 INVOICE_RE = re.compile(r"\b(?:inv|fact|bill)[-/a-z0-9]*\d+\b", re.I)
 BUSINESS_CODE_RE = re.compile(r"\b[a-z]{2,6}\s?\d{2,6}(?:[-/]\d{2,6})+\b", re.I)
+SIMPLE_DOCUMENT_CODE_RE = re.compile(r"\b[a-z]\d{4,}\b", re.I)
 
 RELATIVE_REFERENCES = {
     "purchase": ["esta compra", "esa compra", "la compra anterior", "la compra", "esta orden de compra"],
@@ -85,6 +86,21 @@ def resolve_entity(text: str) -> Entity | None:
             "confidence": 0.9 if target_domain else 0.7,
             "explicit_code": True,
         }
+
+    simple_code_match = SIMPLE_DOCUMENT_CODE_RE.search(value)
+    if simple_code_match:
+        target_domain = _infer_target_domain(value)
+        if target_domain in {"purchase", "sale", "invoice"}:
+            code = simple_code_match.group(0).upper()
+            return {
+                "type": "business_document_code",
+                "code": code,
+                "target_domain": target_domain,
+                "model": _domain_to_model(target_domain),
+                "lookup_field": "name",
+                "confidence": 0.88,
+                "explicit_code": True,
+            }
 
     for target_domain, references in RELATIVE_REFERENCES.items():
         for reference in references:

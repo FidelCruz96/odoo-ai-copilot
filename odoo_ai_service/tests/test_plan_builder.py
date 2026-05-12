@@ -66,6 +66,37 @@ class TestPlanBuilder(unittest.TestCase):
         self.assertEqual(plan[0]["args"]["model"], "account.move")
         self.assertEqual(plan[0]["args"]["groupby"], ["partner_id"])
 
+    def test_document_sale_ranking_uses_search_and_read(self):
+        plan = build_plan(route="erp_data", domain="sale", intent="ranking", entity=None, question="top ventas")
+
+        self.assertEqual([step["tool"] for step in plan], ["query_odoo_search", "query_odoo_read"])
+        self.assertEqual(plan[0]["args"]["model"], "sale.order")
+        self.assertEqual(plan[0]["args"]["orderby"], "amount_total desc")
+
+    def test_customer_sale_ranking_keeps_groupby(self):
+        plan = build_plan(route="erp_data", domain="sale", intent="ranking", entity=None, question="top clientes por ventas")
+
+        self.assertEqual(plan[0]["tool"], "query_odoo_group")
+        self.assertEqual(plan[0]["args"]["groupby"], ["partner_id"])
+
+    def test_document_purchase_ranking_uses_search_and_read(self):
+        plan = build_plan(route="erp_data", domain="purchase", intent="ranking", entity=None, question="top compras")
+
+        self.assertEqual([step["tool"] for step in plan], ["query_odoo_search", "query_odoo_read"])
+        self.assertEqual(plan[0]["args"]["model"], "purchase.order")
+
+    def test_document_invoice_ranking_uses_search_and_read(self):
+        plan = build_plan(route="erp_data", domain="invoice", intent="ranking", entity=None, question="top facturas")
+
+        self.assertEqual([step["tool"] for step in plan], ["query_odoo_search", "query_odoo_read"])
+        self.assertEqual(plan[0]["args"]["model"], "account.move")
+
+    def test_document_invoice_ranking_accepts_singular_highest_phrase(self):
+        plan = build_plan(route="erp_data", domain="invoice", intent="ranking", entity=None, question="facturacion mas alta")
+
+        self.assertEqual([step["tool"] for step in plan], ["query_odoo_search", "query_odoo_read"])
+        self.assertEqual(plan[0]["args"]["orderby"], "amount_total desc")
+
     def test_knowledge_uses_original_question(self):
         plan = build_plan(
             route="knowledge",

@@ -69,6 +69,7 @@ def run_tool_guided_loop(
     intent_plan: dict | None,
     catalog_intent: str | None,
     query_has_explicit_entity_hint: bool,
+    context: dict | None = None,
     finalize: Callable[[str, bool, str | None], dict],
     callbacks: ToolLoopCallbacks,
 ) -> dict:
@@ -255,6 +256,8 @@ def run_tool_guided_loop(
                         tool_result = f"Error de schema: {validation_error}"
                         logger.error(tool_result)
                         raise ValueError(validation_error)
+                    if context and "context" not in arguments:
+                        arguments["context"] = context
 
                 update_metrics_from_tool(metrics, tool_name, arguments)
                 tool_start_ts = time.perf_counter()

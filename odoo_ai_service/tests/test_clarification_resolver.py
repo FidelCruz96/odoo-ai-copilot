@@ -141,6 +141,29 @@ class TestClarificationResolver(unittest.TestCase):
         result = detect_clarification_needed("¿Qué pickings están pendientes de validar hoy?", memory={})
         self.assertIsNone(result)
 
+    def test_period_metric_asks_for_sales_month(self):
+        result = detect_clarification_needed("ventas del mes", memory={})
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("name"), "period_metric_scope")
+
+    def test_period_metric_asks_for_purchase_month(self):
+        result = detect_clarification_needed("compras del mes", memory={})
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("name"), "period_metric_scope")
+
+    def test_period_metric_asks_for_invoice_month(self):
+        result = detect_clarification_needed("facturación del mes", memory={})
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("name"), "period_metric_scope")
+
+    def test_period_metric_does_not_ask_when_metric_is_explicit(self):
+        result = detect_clarification_needed("monto total de ventas del mes", memory={})
+        self.assertIsNone(result)
+
+    def test_period_metric_does_not_ask_for_customer_ranking(self):
+        result = detect_clarification_needed("¿Cuáles son mis 5 clientes con más ventas este mes?", memory={})
+        self.assertIsNone(result)
+
 
 if __name__ == "__main__":
     unittest.main()

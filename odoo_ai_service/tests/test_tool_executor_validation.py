@@ -25,6 +25,21 @@ class TestToolExecutorValidation(unittest.TestCase):
             limit=20,
         )
 
+    def test_execute_tool_passes_internal_context_to_odoo(self):
+        context = {"access_context": {"uid": 2, "db_name": "admin"}}
+        with patch("agents.agent.execution.tool_executor.query_odoo", return_value=[11]) as query_odoo:
+            result = execute_tool("query_odoo_search", {"model": "purchase.order", "context": context})
+
+        self.assertEqual(result, [11])
+        query_odoo.assert_called_once_with(
+            operation="search",
+            model="purchase.order",
+            domain=[],
+            orderby=None,
+            limit=20,
+            context=context,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

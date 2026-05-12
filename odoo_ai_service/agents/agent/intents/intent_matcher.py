@@ -6,6 +6,9 @@ import unicodedata
 from .intent_catalog import INTENT_CATALOG
 
 INTENT_PRIORITY = [
+    "top_ventas_por_monto",
+    "top_compras_por_monto",
+    "top_facturas_por_monto",
     "top_clientes_ventas_mes",
     "clientes_facturas_vencidas_ranking",
     "ordenes_compra_pendientes_recepcion",
@@ -179,6 +182,27 @@ def detect_intent_by_keywords(question: str) -> str | None:
         and contains_any(q, ["venta", "ventas", "facturacion", "facturacion", "compra", "compras"])
     ):
         return "promedio_ventas_por_cliente_periodo"
+
+    if (
+        contains_any(q, ["venta", "ventas", "pedido de venta", "pedidos de venta", "orden de venta", "ordenes de venta"])
+        and contains_any(q, ["top", "mayor", "mayores", "mas alta", "más alta", "mas altas", "más altas"])
+        and not contains_any(q, ["cliente", "clientes", "vendedor", "vendedores", "producto", "productos"])
+    ):
+        return "top_ventas_por_monto"
+
+    if (
+        contains_any(q, ["compra", "compras", "orden de compra", "ordenes de compra"])
+        and contains_any(q, ["top", "mayor", "mayores", "mas alta", "más alta", "mas altas", "más altas"])
+        and not contains_any(q, ["proveedor", "proveedores", "producto", "productos"])
+    ):
+        return "top_compras_por_monto"
+
+    if (
+        contains_any(q, ["factura", "facturas", "facturacion", "facturación"])
+        and contains_any(q, ["top", "mayor", "mayores", "mas alta", "más alta", "mas altas", "más altas"])
+        and not contains_any(q, ["cliente", "clientes", "proveedor", "proveedores"])
+    ):
+        return "top_facturas_por_monto"
 
     if (
         contains_any(q, ["producto", "productos", "articulo", "articulos", "item", "items"])

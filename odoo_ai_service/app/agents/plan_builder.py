@@ -57,6 +57,43 @@ def _default_domain_for_domain(domain: str | None) -> list:
     return []
 
 
+def _is_document_ranking_question(question: str | None, domain: str | None) -> bool:
+    value = (question or "").lower()
+    if not value or domain not in {"sale", "purchase", "invoice"}:
+        return False
+
+    ranking_hint = any(
+        keyword in value
+        for keyword in (
+            "top",
+            "mayores",
+            "mayor monto",
+            "mas alta",
+            "más alta",
+            "mas altas",
+            "más altas",
+            "mas altos",
+            "más altos",
+        )
+    )
+    if not ranking_hint:
+        return False
+
+    if domain == "sale":
+        return not any(keyword in value for keyword in ("cliente", "clientes", "vendedor", "producto", "productos"))
+    if domain == "purchase":
+        return not any(keyword in value for keyword in ("proveedor", "proveedores", "producto", "productos"))
+    if domain == "invoice":
+        return not any(keyword in value for keyword in ("cliente", "clientes", "proveedor", "proveedores"))
+    return False
+
+
+def _document_ranking_fields(domain: str | None) -> list[str]:
+    if domain == "invoice":
+        return ["name", "partner_id", "invoice_date", "amount_total", "payment_state", "state", "move_type"]
+    return ["name", "partner_id", "date_order", "amount_total", "state"]
+
+
 def build_plan(
     route: str,
     domain: str | None,
@@ -149,6 +186,34 @@ def build_plan(
                     "domain": _default_domain_for_domain(domain),
                 },
             }
+        )
+    elif (
+        route == ERP_DATA
+        and intent == "ranking"
+        and domain in {"sale", "invoice", "purchase"}
+        and domain_model
+        and _is_document_ranking_question(question, domain)
+    ):
+        plan.extend(
+            [
+                {
+                    "tool": "query_odoo_search",
+                    "args": {
+                        "model": domain_model,
+                        "domain": _default_domain_for_domain(domain) + [["amount_total", ">", 0]],
+                        "orderby": "amount_total desc",
+                        "limit": 5,
+                    },
+                },
+                {
+                    "tool": "query_odoo_read",
+                    "args": {
+                        "model": domain_model,
+                        "ids": "$previous_result",
+                        "fields": _document_ranking_fields(domain),
+                    },
+                },
+            ]
         )
     elif route == ERP_DATA and intent == "ranking" and domain in {"sale", "invoice", "purchase"} and domain_model:
         amount_field = "amount_total:sum"

@@ -1487,8 +1487,8 @@ def _build_ui_actions(metrics: dict) -> list[dict]:
                 "orderby": orderby,
                 "limit": limit,
             },
-            {"key": "open_invoices", "label": "Ver facturas", "prompt": "muéstrame las facturas relacionadas"},
-            {"key": "order_products", "label": "Ver productos", "prompt": "muéstrame sus productos"},
+            {"key": "open_invoices", "label": "Ver facturas", "prompt": "muéstrame las facturas relacionadas con esta venta"},
+            {"key": "order_products", "label": "Ver productos", "prompt": "qué productos se vendieron en esta venta"},
         ])
     elif model == "account.move":
         actions.extend([
@@ -1537,15 +1537,29 @@ def _build_ui_suggestions(metrics: dict) -> list[dict]:
         ]
     if model == "sale.order":
         return [
-            {"label": "Ventas del mes", "prompt": "ventas del mes"},
-            {"label": "Top clientes", "prompt": "top clientes con ventas este mes"},
-            {"label": "Ventas pendientes", "prompt": "ventas pendientes"},
+            {"label": "Cantidad de ventas", "prompt": "cuántas ventas hay"},
+            {"label": "Top clientes ventas", "prompt": "top clientes por ventas"},
+            {"label": "Monto de ventas", "prompt": "monto total de ventas del mes"},
+        ]
+    if model == "purchase.order":
+        return [
+            {"label": "Cantidad de compras", "prompt": "cuántas compras hay"},
+            {"label": "Top proveedores", "prompt": "top proveedores por compras"},
+            {"label": "Política de compras", "prompt": "cómo funciona la política de aprobación de compras"},
+        ]
+    if model == "account.move":
+        return [
+            {"label": "Cantidad de facturas", "prompt": "cuántas facturas hay"},
+            {"label": "Facturación clientes", "prompt": "top clientes por facturación"},
+            {"label": "Facturas vencidas", "prompt": "cuántas facturas vencidas hay"},
         ]
     return [
-        {"label": "Ventas del mes", "prompt": "ventas del mes"},
-        {"label": "Facturas pendientes", "prompt": "facturas pendientes este mes"},
-        {"label": "Top clientes", "prompt": "top clientes con ventas este mes"},
-        {"label": "Stock negativo", "prompt": "productos con stock negativo"},
+        {"label": "Cantidad de ventas", "prompt": "cuántas ventas hay"},
+        {"label": "Top clientes ventas", "prompt": "top clientes por ventas"},
+        {"label": "Cantidad de compras", "prompt": "cuántas compras hay"},
+        {"label": "Top proveedores", "prompt": "top proveedores por compras"},
+        {"label": "Facturación clientes", "prompt": "top clientes por facturación"},
+        {"label": "Política de compras", "prompt": "cómo funciona la política de aprobación de compras"},
     ]
 
 
@@ -2023,6 +2037,7 @@ def ask_agent(question: str, context: dict | None = None, history: list | None =
         intent_plan=intent_plan,
         catalog_intent=catalog_intent,
         query_has_explicit_entity_hint=query_has_explicit_entity_hint,
+        context=context,
         finalize=lambda answer, success, error_type=None: _finalize(answer, success=success, error_type=error_type),
         callbacks=callbacks,
     )

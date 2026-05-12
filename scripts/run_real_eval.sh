@@ -64,6 +64,7 @@ batches = [
     ("purchase", ["purchase_approvals.md", "purchase_process.md"]),
     ("inventory", ["inventory_process.md"]),
     ("sale", ["sale_process.md"]),
+    ("invoice", ["invoice_process.md"]),
 ]
 
 for module, names in batches:
